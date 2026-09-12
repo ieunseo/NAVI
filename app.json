@@ -51,15 +51,6 @@
       ],
 
       [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/notification-icon.png",
-          "color": "#208AEF",
-          "defaultChannel": "schedule"
-        }
-      ],
-
-      [
         "expo-audio",
         {
           "microphonePermission": "음성으로 일정을 등록하기 위해 마이크 접근이 필요합니다.",

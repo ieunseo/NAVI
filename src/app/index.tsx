@@ -1,9 +1,17 @@
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import {
+    Pressable,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+
 import { Colors } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
-
+import { ScheduleCard } from "@/components/home/ScheduleCard";
 
 const WEEKDAYS = [
     "일요일",
@@ -13,6 +21,25 @@ const WEEKDAYS = [
     "목요일",
     "금요일",
     "토요일",
+];
+
+const schedules = [
+    {
+        id: "1",
+        title: "책 읽기",
+        time: "오후 8:00",
+        status: "대기",
+        completed: false,
+        period: "오후",
+    },
+    {
+        id: "2",
+        title: "회의 준비",
+        time: "오전 10:00",
+        status: "대기",
+        completed: false,
+        period: "오전",
+    },
 ];
 
 function getTodayText() {
@@ -29,18 +56,25 @@ export default function HomeScreen() {
     const todayText = getTodayText();
     const { session, loading } = useAuth();
 
-    //loading 처리
+    const [selectedFilter, setSelectedFilter] = useState<
+        "전체" | "오전" | "오후"
+    >("전체");
+
+    const filteredSchedules =
+        selectedFilter === "전체"
+            ? schedules
+            : schedules.filter(
+                (schedule) => schedule.period === selectedFilter
+            );
+
+    const scheduleCount = schedules.length;
+
     if (loading) {
         return (
-            <View
-                style={{
-                    flex: 1,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: "#FFFFFF",
-                }}
-            >
-                <Text>불러오는 중...</Text>
+            <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>
+                    불러오는 중...
+                </Text>
             </View>
         );
     }
@@ -63,7 +97,9 @@ export default function HomeScreen() {
                             onPress={handleLogin}
                             hitSlop={10}
                         >
-                            <Text style={styles.loginText}>로그인</Text>
+                            <Text style={styles.loginText}>
+                                로그인
+                            </Text>
                         </Pressable>
                     ) : (
                         <Text style={styles.loginText}>
@@ -84,13 +120,24 @@ export default function HomeScreen() {
                 </View>
 
                 {/* 날짜 */}
+                <View style={styles.dateArea}>
+                    <Text style={styles.dateText}>
+                        {todayText}
+                    </Text>
+
+                    <Text style={styles.subText}>
+                        오늘도 차근차근 해볼까요?
+                    </Text>
+                </View>
+
+                {/* 비회원 배너 */}
                 {!session && (
                     <Pressable
                         style={styles.guestBanner}
                         onPress={handleAddSchedule}
                     >
                         <Text style={styles.guestBannerText}>
-                            직접 입력으로 바로 시작하세요
+                            일정을 입력해 시작하세요
                         </Text>
 
                         <Text style={styles.guestBannerArrow}>
@@ -102,7 +149,7 @@ export default function HomeScreen() {
                 {/* 일정 헤더 */}
                 <View style={styles.scheduleHeader}>
                     <Text style={styles.scheduleTitle}>
-                        오늘의 할 일 0
+                        오늘의 할 일 {scheduleCount}
                     </Text>
 
                     <Text style={styles.deviceText}>
@@ -112,32 +159,84 @@ export default function HomeScreen() {
 
                 {/* 필터 */}
                 <View style={styles.filterRow}>
-                    <FilterButton title="전체" />
-                    <FilterButton title="오전" />
-                    <FilterButton title="오후" />
-                </View>
-
-                {/* 빈 일정 */}
-                <View style={styles.emptyArea}>
-                    <Ionicons
-                        name="calendar-outline"
-                        size={48}
-                        color="#C3C5CA"
+                    <FilterButton
+                        title="전체"
+                        selected={selectedFilter === "전체"}
+                        onPress={() => setSelectedFilter("전체")}
                     />
 
-                    <Text style={styles.emptyText}>
-                        아직 등록한 일정이 없어요.
-                    </Text>
+                    <FilterButton
+                        title="오전"
+                        selected={selectedFilter === "오전"}
+                        onPress={() => setSelectedFilter("오전")}
+                    />
 
-                    <Pressable
-                        style={styles.addButton}
-                        onPress={handleAddSchedule}
-                    >
-                        <Text style={styles.addButtonText}>
-                            일정 직접 추가
-                        </Text>
-                    </Pressable>
+                    <FilterButton
+                        title="오후"
+                        selected={selectedFilter === "오후"}
+                        onPress={() => setSelectedFilter("오후")}
+                    />
                 </View>
+
+                {/* 일정 */}
+                {scheduleCount === 0 ? (
+                    <View style={styles.emptyArea}>
+                        <Ionicons
+                            name="calendar-outline"
+                            size={48}
+                            color="#C3C5CA"
+                        />
+
+                        <Text style={styles.emptyText}>
+                            아직 등록한 일정이 없어요.
+                        </Text>
+
+                        <Pressable
+                            style={styles.addButton}
+                            onPress={handleAddSchedule}
+                        >
+                            <Text style={styles.addButtonText}>
+                                일정 직접 추가
+                            </Text>
+                        </Pressable>
+                    </View>
+                ) : filteredSchedules.length === 0 ? (
+                    <View style={styles.emptyArea}>
+                        <Ionicons
+                            name="calendar-outline"
+                            size={44}
+                            color="#C3C5CA"
+                        />
+
+                        <Text style={styles.emptyText}>
+                            해당 시간대에 일정이 없어요.
+                        </Text>
+                    </View>
+                ) : (
+                    <View style={styles.scheduleList}>
+                        {filteredSchedules.map((schedule) => (
+                            <ScheduleCard
+                                key={schedule.id}
+                                title={schedule.title}
+                                time={schedule.time}
+                                status={schedule.status}
+                                completed={schedule.completed}
+                                onPress={() => {
+                                    console.log(
+                                        "일정 선택:",
+                                        schedule.id
+                                    );
+                                }}
+                                onToggle={() => {
+                                    console.log(
+                                        "완료 상태 변경:",
+                                        schedule.id
+                                    );
+                                }}
+                            />
+                        ))}
+                    </View>
+                )}
 
                 {/* 하단 탭 */}
                 <View style={styles.bottomNavigation}>
@@ -163,12 +262,27 @@ export default function HomeScreen() {
 
 function FilterButton({
                           title,
+                          selected,
+                          onPress,
                       }: {
     title: string;
+    selected: boolean;
+    onPress: () => void;
 }) {
     return (
-        <Pressable style={styles.filterButton}>
-            <Text style={styles.filterText}>
+        <Pressable
+            style={[
+                styles.filterButton,
+                selected && styles.filterButtonSelected,
+            ]}
+            onPress={onPress}
+        >
+            <Text
+                style={[
+                    styles.filterText,
+                    selected && styles.filterTextSelected,
+                ]}
+            >
                 {title}
             </Text>
         </Pressable>
@@ -213,6 +327,18 @@ const styles = StyleSheet.create({
         backgroundColor: "#FFFFFF",
     },
 
+    loadingContainer: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#FFFFFF",
+    },
+
+    loadingText: {
+        fontSize: 16,
+        color: "#777B84",
+    },
+
     topBar: {
         height: 70,
         paddingHorizontal: 24,
@@ -246,8 +372,31 @@ const styles = StyleSheet.create({
         color: "#777B84",
     },
 
+    guestBanner: {
+        marginTop: 24,
+        marginHorizontal: 24,
+        height: 56,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        backgroundColor: "#FFF4F4",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+
+    guestBannerText: {
+        fontSize: 14,
+        fontWeight: "500",
+        color: "#444444",
+    },
+
+    guestBannerArrow: {
+        fontSize: 22,
+        color: "#666666",
+    },
+
     scheduleHeader: {
-        marginTop: 62,
+        marginTop: 40,
         paddingHorizontal: 24,
         flexDirection: "row",
         alignItems: "center",
@@ -284,9 +433,26 @@ const styles = StyleSheet.create({
         backgroundColor: "#F8F8F9",
     },
 
+    filterButtonSelected: {
+        backgroundColor: "#111111",
+        borderColor: "#111111",
+    },
+
     filterText: {
         fontSize: 15,
         color: "#52555C",
+    },
+
+    filterTextSelected: {
+        color: "#FFFFFF",
+        fontWeight: "600",
+    },
+
+    scheduleList: {
+        flex: 1,
+        paddingHorizontal: 24,
+        paddingTop: 24,
+        gap: 12,
     },
 
     emptyArea: {
@@ -341,27 +507,5 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: "600",
         color: "#111111",
-    },
-    guestBanner: {
-        marginTop: 24,
-        marginHorizontal: 24,
-        height: 56,
-        paddingHorizontal: 16,
-        borderRadius: 12,
-        backgroundColor: "#FFF4F4",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-
-    guestBannerText: {
-        fontSize: 14,
-        fontWeight: "500",
-        color: "#444444",
-    },
-
-    guestBannerArrow: {
-        fontSize: 22,
-        color: "#666666",
     },
 });
