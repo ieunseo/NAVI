@@ -13,7 +13,7 @@
 
     "ios": {
       "bundleIdentifier": "com.ieunseo.navi",
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "supportsTablet": false,
       "config": {
         "usesNonExemptEncryption": false
