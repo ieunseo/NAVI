@@ -1,4 +1,5 @@
 import {
+    Alert,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -18,6 +19,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import {
+    cancelScheduledNotificationAsync,
+} from "expo-notifications/build/cancelScheduledNotificationAsync";
+
 import { Colors } from "@/constants/colors";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 
@@ -33,7 +38,6 @@ import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
 import { AppErrorScreen } from "@/components/ui/AppErrorScreen";
 import { LoginRequiredModal } from "@/components/auth/LoginRequiredModal";
 
-
 /*
  * =====================================================
  * 타입
@@ -46,6 +50,10 @@ type RepeatType =
     | "weekday"
     | "weekly";
 
+type ScheduleStatus =
+    | "pending"
+    | "completed"
+    | "failed";
 
 type LocalSchedule = {
     id: string;
@@ -56,19 +64,20 @@ type LocalSchedule = {
 
     scheduledAt: string;
 
-    /*
-     * 기존 일정에는 repeatType이 없을 수 있으므로
-     * optional로 처리합니다.
-     *
-     * 값이 없으면 반복 없음으로 해석합니다.
-     */
     repeatType?: RepeatType;
 
-    status:
-        | "pending"
-        | "completed"
-        | "failed";
+    status: ScheduleStatus;
 
+    /*
+     * 기존 데이터 / 기존 코드 호환용입니다.
+     *
+     * 현재는 status와 함께 저장하지만
+     * 상태 판단 기준은 status입니다.
+     *
+     * pending   → false
+     * completed → true
+     * failed    → false
+     */
     completed: boolean;
 
     reminderMinutes?:
@@ -78,12 +87,10 @@ type LocalSchedule = {
         string | null;
 };
 
-
 type HomeScheduleTestState =
     | "real"
     | "empty"
     | "with-data";
-
 
 /*
  * =====================================================
@@ -100,7 +107,6 @@ const WEEKDAYS = [
     "금요일",
     "토요일",
 ];
-
 
 function createTodayDate(
     hour: number,
@@ -119,7 +125,6 @@ function createTodayDate(
     return date;
 }
 
-
 /*
  * =====================================================
  * [개발용 테스트 데이터]
@@ -129,11 +134,9 @@ function createTodayDate(
 const TEST_SCHEDULES:
     LocalSchedule[] = [
     {
-        id:
-            "test-1",
+        id: "test-1",
 
-        title:
-            "회의 준비",
+        title: "회의 준비",
 
         memo:
             "회의 자료 확인",
@@ -161,11 +164,9 @@ const TEST_SCHEDULES:
     },
 
     {
-        id:
-            "test-2",
+        id: "test-2",
 
-        title:
-            "책 읽기",
+        title: "책 읽기",
 
         memo:
             "30페이지 읽기",
@@ -180,10 +181,10 @@ const TEST_SCHEDULES:
             "daily",
 
         status:
-            "pending",
+            "completed",
 
         completed:
-            false,
+            true,
 
         reminderMinutes:
             30,
@@ -191,8 +192,38 @@ const TEST_SCHEDULES:
         localNotificationId:
             null,
     },
-];
 
+    {
+        id: "test-3",
+
+        title:
+            "택배 보내기",
+
+        memo:
+            null,
+
+        scheduledAt:
+            createTodayDate(
+                21,
+                30
+            ).toISOString(),
+
+        repeatType:
+            "none",
+
+        status:
+            "failed",
+
+        completed:
+            false,
+
+        reminderMinutes:
+            null,
+
+        localNotificationId:
+            null,
+    },
+];
 
 function getTodayText() {
     const today =
@@ -213,7 +244,6 @@ function getTodayText() {
     return `${month}월 ${date}일 ${day}`;
 }
 
-
 /*
  * =====================================================
  * Storage
@@ -228,6 +258,40 @@ function getScheduleStorageKey(
     }`;
 }
 
+/*
+ * =====================================================
+ * 기존 일정 데이터 보정
+ * =====================================================
+ */
+
+function normalizeSchedule(
+    schedule:
+    LocalSchedule
+): LocalSchedule {
+    const normalizedStatus:
+        ScheduleStatus =
+        schedule.status ??
+        (
+            schedule.completed
+                ? "completed"
+                : "pending"
+        );
+
+    return {
+        ...schedule,
+
+        repeatType:
+            schedule.repeatType ??
+            "none",
+
+        status:
+        normalizedStatus,
+
+        completed:
+            normalizedStatus ===
+            "completed",
+    };
+}
 
 /*
  * =====================================================
@@ -236,7 +300,8 @@ function getScheduleStorageKey(
  */
 
 function isTodaySchedule(
-    schedule: LocalSchedule
+    schedule:
+    LocalSchedule
 ) {
     const scheduledDate =
         new Date(
@@ -258,9 +323,9 @@ function isTodaySchedule(
     );
 }
 
-
 function getSchedulePeriod(
-    schedule: LocalSchedule
+    schedule:
+    LocalSchedule
 ):
     | "오전"
     | "오후" {
@@ -273,7 +338,6 @@ function getSchedulePeriod(
         ? "오전"
         : "오후";
 }
-
 
 function formatScheduleTime(
     scheduledAt: string
@@ -307,31 +371,6 @@ function formatScheduleTime(
     )}`;
 }
 
-
-function getScheduleStatusText(
-    schedule: LocalSchedule
-) {
-    if (
-        schedule.completed ||
-        schedule.status ===
-        "completed"
-    ) {
-        return "완료";
-    }
-
-
-    if (
-        schedule.status ===
-        "failed"
-    ) {
-        return "실패";
-    }
-
-
-    return "대기";
-}
-
-
 /*
  * =====================================================
  * [개발용 Home 일정 상태 테스트]
@@ -343,10 +382,8 @@ function getHomeScheduleTestState():
     return "real";
 }
 
-
 const HOME_SCHEDULE_STATE_FOR_TEST =
     getHomeScheduleTestState();
-
 
 /*
  * =====================================================
@@ -358,7 +395,6 @@ export default function HomeScreen() {
     const todayText =
         getTodayText();
 
-
     const {
         session,
         loading,
@@ -368,7 +404,6 @@ export default function HomeScreen() {
             retryAuth,
     } =
         useAuth();
-
 
     const {
         requireAuth,
@@ -381,7 +416,6 @@ export default function HomeScreen() {
     } =
         useRequireAuth();
 
-
     const [
         checkingPermissionOnboarding,
         setCheckingPermissionOnboarding,
@@ -390,7 +424,6 @@ export default function HomeScreen() {
             true
         );
 
-
     const [
         loadingSchedules,
         setLoadingSchedules,
@@ -398,7 +431,6 @@ export default function HomeScreen() {
         useState(
             true
         );
-
 
     const [
         schedules,
@@ -409,7 +441,6 @@ export default function HomeScreen() {
         >(
             []
         );
-
 
     const [
         selectedFilter,
@@ -422,7 +453,6 @@ export default function HomeScreen() {
         >(
             "전체"
         );
-
 
     /*
      * =====================================================
@@ -440,7 +470,6 @@ export default function HomeScreen() {
             null
         );
 
-
     const [
         scheduleInfoVisible,
         setScheduleInfoVisible,
@@ -448,7 +477,6 @@ export default function HomeScreen() {
         useState(
             false
         );
-
 
     /*
      * =====================================================
@@ -461,7 +489,6 @@ export default function HomeScreen() {
             let mounted =
                 true;
 
-
             const checkPermissionOnboarding =
                 async () => {
                     try {
@@ -471,13 +498,11 @@ export default function HomeScreen() {
                                     .permissionOnboardingCompleted
                             );
 
-
                         if (
                             !mounted
                         ) {
                             return;
                         }
-
 
                         if (
                             completed !==
@@ -490,7 +515,6 @@ export default function HomeScreen() {
                             return;
                         }
 
-
                         setCheckingPermissionOnboarding(
                             false
                         );
@@ -502,7 +526,6 @@ export default function HomeScreen() {
                             error
                         );
 
-
                         if (
                             mounted
                         ) {
@@ -513,9 +536,7 @@ export default function HomeScreen() {
                     }
                 };
 
-
             void checkPermissionOnboarding();
-
 
             return () => {
                 mounted =
@@ -524,7 +545,6 @@ export default function HomeScreen() {
         },
         []
     );
-
 
     /*
      * =====================================================
@@ -545,7 +565,6 @@ export default function HomeScreen() {
     const FORCE_ERROR_SCREEN_FOR_TEST =
         false;
 
-
     /*
      * [개발용 테스트 코드]
      *
@@ -562,7 +581,6 @@ export default function HomeScreen() {
                     .auth
                     .signOut();
 
-
             if (
                 error
             ) {
@@ -574,18 +592,45 @@ export default function HomeScreen() {
                 return;
             }
 
-
             console.log(
                 "[개발용] 로그아웃 완료"
             );
         };
-
 
     /*
      * =====================================================
      * =====================================================
      */
 
+    /*
+     * =====================================================
+     * 일정 저장 공통 함수
+     * =====================================================
+     */
+
+    const saveSchedules =
+        async (
+            nextSchedules:
+            LocalSchedule[]
+        ) => {
+            const storageKey =
+                getScheduleStorageKey(
+                    session
+                        ?.user
+                        .id
+                );
+
+            await AsyncStorage.setItem(
+                storageKey,
+                JSON.stringify(
+                    nextSchedules
+                )
+            );
+
+            setSchedules(
+                nextSchedules
+            );
+        };
 
     /*
      * =====================================================
@@ -600,7 +645,6 @@ export default function HomeScreen() {
                     true
                 );
 
-
                 try {
                     if (
                         HOME_SCHEDULE_STATE_FOR_TEST ===
@@ -613,7 +657,6 @@ export default function HomeScreen() {
                         return;
                     }
 
-
                     if (
                         HOME_SCHEDULE_STATE_FOR_TEST ===
                         "with-data"
@@ -625,7 +668,6 @@ export default function HomeScreen() {
                         return;
                     }
 
-
                     const storageKey =
                         getScheduleStorageKey(
                             session
@@ -633,12 +675,10 @@ export default function HomeScreen() {
                                 .id
                         );
 
-
                     const storedSchedules =
                         await AsyncStorage.getItem(
                             storageKey
                         );
-
 
                     if (
                         !storedSchedules
@@ -650,12 +690,10 @@ export default function HomeScreen() {
                         return;
                     }
 
-
                     const parsedSchedules =
                         JSON.parse(
                             storedSchedules
                         );
-
 
                     if (
                         !Array.isArray(
@@ -669,25 +707,20 @@ export default function HomeScreen() {
                         return;
                     }
 
-
                     /*
-                     * 기존 데이터에는 repeatType이
-                     * 없을 수 있으므로 기본값 보정
+                     * 기존 데이터에는 repeatType 등이
+                     * 없을 수 있으므로 기본값을 보정합니다.
                      */
                     const normalizedSchedules:
                         LocalSchedule[] =
                         parsedSchedules.map(
                             (
                                 schedule
-                            ) => ({
-                                ...schedule,
-
-                                repeatType:
-                                    schedule.repeatType ??
-                                    "none",
-                            })
+                            ) =>
+                                normalizeSchedule(
+                                    schedule
+                                )
                         );
-
 
                     setSchedules(
                         normalizedSchedules
@@ -699,7 +732,6 @@ export default function HomeScreen() {
                         "로컬 일정 불러오기 오류:",
                         error
                     );
-
 
                     setSchedules(
                         []
@@ -717,7 +749,6 @@ export default function HomeScreen() {
             ]
         );
 
-
     useEffect(
         () => {
             void loadSchedules();
@@ -727,6 +758,11 @@ export default function HomeScreen() {
         ]
     );
 
+    /*
+     * =====================================================
+     * 오늘 일정
+     * =====================================================
+     */
 
     const todaySchedules =
         schedules
@@ -746,12 +782,10 @@ export default function HomeScreen() {
                     ).getTime()
             );
 
-
     const filteredSchedules =
         selectedFilter ===
         "전체"
             ? todaySchedules
-
             : todaySchedules.filter(
                 (
                     schedule
@@ -762,10 +796,8 @@ export default function HomeScreen() {
                     selectedFilter
             );
 
-
     const scheduleCount =
         todaySchedules.length;
-
 
     /*
      * =====================================================
@@ -783,17 +815,14 @@ export default function HomeScreen() {
                 schedule.id
             );
 
-
             setSelectedSchedule(
                 schedule
             );
-
 
             setScheduleInfoVisible(
                 true
             );
         };
-
 
     const closeScheduleInfo =
         () => {
@@ -802,12 +831,9 @@ export default function HomeScreen() {
             );
         };
 
-
     /*
-     * 수정 화면은 다음 Task에서 구현합니다.
-     *
-     * 현재는 연필 버튼이 정상적으로
-     * 눌리는지만 확인합니다.
+     * 일정 수정 화면은
+     * 별도 Issue에서 구현합니다.
      */
     const handleEditSchedule =
         (
@@ -819,26 +845,284 @@ export default function HomeScreen() {
                 schedule.id
             );
 
-
             setScheduleInfoVisible(
                 false
             );
 
-
             /*
              * TODO
              *
-             * 일정 수정 화면 구현 후:
-             *
-             * router.push({
-             *     pathname: "/schedule-edit",
-             *     params: {
-             *         scheduleId: schedule.id,
-             *     },
-             * });
+             * 일정 수정 화면 구현 후
+             * 해당 schedule.id를 넘겨 이동합니다.
              */
         };
 
+    /*
+     * =====================================================
+     * 왼쪽 Swipe
+     *
+     * pending   → completed
+     * completed → pending
+     * failed    → pending
+     * =====================================================
+     */
+
+    const handleToggleSchedule =
+        async (
+            schedule:
+            LocalSchedule
+        ) => {
+            let nextStatus:
+                ScheduleStatus;
+
+            if (
+                schedule.status ===
+                "pending"
+            ) {
+                nextStatus =
+                    "completed";
+            } else {
+                /*
+                 * completed 또는 failed
+                 * → pending으로 복귀
+                 */
+                nextStatus =
+                    "pending";
+            }
+
+            const nextCompleted =
+                nextStatus ===
+                "completed";
+
+            const updatedSchedule:
+                LocalSchedule = {
+                ...schedule,
+
+                status:
+                nextStatus,
+
+                completed:
+                nextCompleted,
+            };
+
+            const nextSchedules =
+                schedules.map(
+                    (
+                        item
+                    ) =>
+                        item.id ===
+                        schedule.id
+                            ? updatedSchedule
+                            : item
+                );
+
+            try {
+                await saveSchedules(
+                    nextSchedules
+                );
+
+                if (
+                    selectedSchedule?.id ===
+                    schedule.id
+                ) {
+                    setSelectedSchedule(
+                        updatedSchedule
+                    );
+                }
+
+                console.log(
+                    "일정 상태 변경 완료:",
+                    {
+                        scheduleId:
+                        schedule.id,
+
+                        previousStatus:
+                        schedule.status,
+
+                        nextStatus,
+                    }
+                );
+            } catch (
+                error
+                ) {
+                console.error(
+                    "일정 상태 변경 오류:",
+                    error
+                );
+
+                Alert.alert(
+                    "상태를 변경하지 못했어요",
+                    "잠시 후 다시 시도해 주세요."
+                );
+            }
+        };
+
+    /*
+     * =====================================================
+     * 오른쪽 Swipe
+     *
+     * pending   → failed
+     * completed → failed
+     * failed    → 변화 없음
+     * =====================================================
+     */
+
+    const handleFailSchedule =
+        async (
+            schedule:
+            LocalSchedule
+        ) => {
+            if (
+                schedule.status ===
+                "failed"
+            ) {
+                return;
+            }
+
+            const updatedSchedule:
+                LocalSchedule = {
+                ...schedule,
+
+                status:
+                    "failed",
+
+                completed:
+                    false,
+            };
+
+            const nextSchedules =
+                schedules.map(
+                    (
+                        item
+                    ) =>
+                        item.id ===
+                        schedule.id
+                            ? updatedSchedule
+                            : item
+                );
+
+            try {
+                await saveSchedules(
+                    nextSchedules
+                );
+
+                if (
+                    selectedSchedule?.id ===
+                    schedule.id
+                ) {
+                    setSelectedSchedule(
+                        updatedSchedule
+                    );
+                }
+
+                console.log(
+                    "일정 실패 처리 완료:",
+                    schedule.id
+                );
+            } catch (
+                error
+                ) {
+                console.error(
+                    "일정 실패 처리 오류:",
+                    error
+                );
+
+                Alert.alert(
+                    "상태를 변경하지 못했어요",
+                    "잠시 후 다시 시도해 주세요."
+                );
+            }
+        };
+
+    /*
+     * =====================================================
+     * 일정 삭제
+     *
+     * Swipe에서는 삭제하지 않습니다.
+     *
+     * 일정 상세 Popup의
+     * "삭제하기" 버튼에서만 호출합니다.
+     * =====================================================
+     */
+
+    const handleDeleteSchedule =
+        async (
+            schedule:
+            LocalSchedule
+        ) => {
+            try {
+                /*
+                 * 예약된 Local Notification이 있다면
+                 * 삭제 전에 함께 취소합니다.
+                 */
+                if (
+                    schedule.localNotificationId
+                ) {
+                    try {
+                        await cancelScheduledNotificationAsync(
+                            schedule.localNotificationId
+                        );
+
+                        console.log(
+                            "예약 알림 취소 완료:",
+                            schedule.localNotificationId
+                        );
+                    } catch (
+                        notificationError
+                        ) {
+                        /*
+                         * 알림 취소가 실패해도
+                         * 일정 삭제 자체는 진행합니다.
+                         *
+                         * 이미 실행되었거나
+                         * 이미 취소된 알림일 수 있습니다.
+                         */
+                        console.error(
+                            "예약 알림 취소 오류:",
+                            notificationError
+                        );
+                    }
+                }
+
+                const nextSchedules =
+                    schedules.filter(
+                        (
+                            item
+                        ) =>
+                            item.id !==
+                            schedule.id
+                    );
+
+                await saveSchedules(
+                    nextSchedules
+                );
+
+                setScheduleInfoVisible(
+                    false
+                );
+
+                setSelectedSchedule(
+                    null
+                );
+
+                console.log(
+                    "일정 삭제 완료:",
+                    schedule.id
+                );
+            } catch (
+                error
+                ) {
+                console.error(
+                    "일정 삭제 오류:",
+                    error
+                );
+
+                Alert.alert(
+                    "일정을 삭제하지 못했어요",
+                    "잠시 후 다시 시도해 주세요."
+                );
+            }
+        };
 
     /*
      * =====================================================
@@ -860,7 +1144,6 @@ export default function HomeScreen() {
         );
     }
 
-
     /*
      * =====================================================
      * Loading
@@ -877,7 +1160,6 @@ export default function HomeScreen() {
         );
     }
 
-
     if (
         authError
     ) {
@@ -893,7 +1175,6 @@ export default function HomeScreen() {
         );
     }
 
-
     /*
      * =====================================================
      * Navigation
@@ -907,14 +1188,12 @@ export default function HomeScreen() {
             );
         };
 
-
     const handleManualInput =
         () => {
             router.push(
                 "/create-manual"
             );
         };
-
 
     const handleVoiceInput =
         () => {
@@ -927,17 +1206,14 @@ export default function HomeScreen() {
             );
         };
 
-
     const handleDirectInputFromLoginModal =
         () => {
             closeLoginRequired();
-
 
             router.push(
                 "/create-manual"
             );
         };
-
 
     /*
      * =====================================================
@@ -957,6 +1233,11 @@ export default function HomeScreen() {
                         styles.container
                     }
                 >
+                    {/*
+                     * =====================================================
+                     * 상단
+                     * =====================================================
+                     */}
                     <View
                         style={
                             styles.topBar
@@ -967,9 +1248,7 @@ export default function HomeScreen() {
                                 onPress={
                                     handleLogin
                                 }
-                                hitSlop={
-                                    10
-                                }
+                                hitSlop={10}
                             >
                                 <Text
                                     style={
@@ -984,9 +1263,7 @@ export default function HomeScreen() {
                                 onPress={
                                     handleLogoutForTest
                                 }
-                                hitSlop={
-                                    10
-                                }
+                                hitSlop={10}
                             >
                                 <Text
                                     style={
@@ -1002,26 +1279,25 @@ export default function HomeScreen() {
                             </Pressable>
                         )}
 
-
                         <Pressable
                             onPress={
                                 handleManualInput
                             }
-                            hitSlop={
-                                10
-                            }
+                            hitSlop={10}
                         >
                             <Ionicons
                                 name="add-outline"
-                                size={
-                                    32
-                                }
+                                size={32}
                                 color="#111111"
                             />
                         </Pressable>
                     </View>
 
-
+                    {/*
+                     * =====================================================
+                     * Home Scroll
+                     * =====================================================
+                     */}
                     <ScrollView
                         style={
                             styles.homeScroll
@@ -1048,7 +1324,6 @@ export default function HomeScreen() {
                                 }
                             </Text>
 
-
                             <Text
                                 style={
                                     styles.subText
@@ -1057,7 +1332,6 @@ export default function HomeScreen() {
                                 오늘도 차근차근 해볼까요?
                             </Text>
                         </View>
-
 
                         {!session && (
                             <Pressable
@@ -1076,7 +1350,6 @@ export default function HomeScreen() {
                                     일정을 입력해 시작하세요
                                 </Text>
 
-
                                 <Text
                                     style={
                                         styles.guestBannerArrow
@@ -1086,7 +1359,6 @@ export default function HomeScreen() {
                                 </Text>
                             </Pressable>
                         )}
-
 
                         <View
                             style={
@@ -1104,7 +1376,6 @@ export default function HomeScreen() {
                                 }
                             </Text>
 
-
                             <Text
                                 style={
                                     styles.deviceText
@@ -1113,7 +1384,6 @@ export default function HomeScreen() {
                                 이 기기에 저장된 일정
                             </Text>
                         </View>
-
 
                         {scheduleCount >
                             0 && (
@@ -1135,7 +1405,6 @@ export default function HomeScreen() {
                                         }
                                     />
 
-
                                     <FilterButton
                                         title="오전"
                                         selected={
@@ -1148,7 +1417,6 @@ export default function HomeScreen() {
                                             )
                                         }
                                     />
-
 
                                     <FilterButton
                                         title="오후"
@@ -1165,7 +1433,6 @@ export default function HomeScreen() {
                                 </View>
                             )}
 
-
                         {scheduleCount ===
                         0 ? (
                             <View
@@ -1175,12 +1442,9 @@ export default function HomeScreen() {
                             >
                                 <Ionicons
                                     name="calendar-outline"
-                                    size={
-                                        48
-                                    }
+                                    size={48}
                                     color="#C3C5CA"
                                 />
-
 
                                 <Text
                                     style={
@@ -1189,7 +1453,6 @@ export default function HomeScreen() {
                                 >
                                     아직 등록한 일정이 없어요.
                                 </Text>
-
 
                                 <Pressable
                                     style={
@@ -1217,12 +1480,9 @@ export default function HomeScreen() {
                             >
                                 <Ionicons
                                     name="calendar-outline"
-                                    size={
-                                        44
-                                    }
+                                    size={44}
                                     color="#C3C5CA"
                                 />
-
 
                                 <Text
                                     style={
@@ -1255,30 +1515,23 @@ export default function HomeScreen() {
                                                 )
                                             }
                                             status={
-                                                getScheduleStatusText(
-                                                    schedule
-                                                )
-                                            }
-                                            completed={
-                                                schedule.completed
+                                                schedule.status
                                             }
                                             onPress={() =>
                                                 handleSchedulePress(
                                                     schedule
                                                 )
                                             }
-                                            onToggle={() => {
-                                                /*
-                                                 * 기존 왼쪽 Swipe
-                                                 * 완료 / 대기 변경 로직을
-                                                 * 현재 ScheduleCard에서
-                                                 * 그대로 사용합니다.
-                                                 */
-                                                console.log(
-                                                    "완료 상태 변경:",
-                                                    schedule.id
-                                                );
-                                            }}
+                                            onToggle={() =>
+                                                void handleToggleSchedule(
+                                                    schedule
+                                                )
+                                            }
+                                            onFail={() =>
+                                                void handleFailSchedule(
+                                                    schedule
+                                                )
+                                            }
                                         />
                                     )
                                 )}
@@ -1286,7 +1539,11 @@ export default function HomeScreen() {
                         )}
                     </ScrollView>
 
-
+                    {/*
+                     * =====================================================
+                     * 하단 Navigation
+                     * =====================================================
+                     */}
                     <View
                         style={
                             styles.bottomNavigation
@@ -1297,7 +1554,6 @@ export default function HomeScreen() {
                             label="캘린더"
                         />
 
-
                         <BottomTab
                             icon="mic-outline"
                             label="음성 입력"
@@ -1305,7 +1561,6 @@ export default function HomeScreen() {
                                 handleVoiceInput
                             }
                         />
-
 
                         <BottomTab
                             icon="settings-outline"
@@ -1315,7 +1570,11 @@ export default function HomeScreen() {
                 </View>
             </SafeAreaView>
 
-
+            {/*
+             * =====================================================
+             * 비회원 로그인 안내
+             * =====================================================
+             */}
             <LoginRequiredModal
                 visible={
                     loginRequiredVisible
@@ -1331,13 +1590,11 @@ export default function HomeScreen() {
                 }
             />
 
-
             {/*
              * =====================================================
              * 일정 정보 Popup
              * =====================================================
              */}
-
             <ScheduleInfoModal
                 visible={
                     scheduleInfoVisible
@@ -1351,11 +1608,17 @@ export default function HomeScreen() {
                 onEdit={
                     handleEditSchedule
                 }
+                onDelete={(
+                    schedule
+                ) => {
+                    void handleDeleteSchedule(
+                        schedule
+                    );
+                }}
             />
         </>
     );
 }
-
 
 /*
  * =====================================================
@@ -1368,14 +1631,11 @@ function FilterButton({
                           selected,
                           onPress,
                       }: {
-    title:
-        string;
+    title: string;
 
-    selected:
-        boolean;
+    selected: boolean;
 
-    onPress:
-        () => void;
+    onPress: () => void;
 }) {
     return (
         <Pressable
@@ -1405,7 +1665,6 @@ function FilterButton({
     );
 }
 
-
 /*
  * =====================================================
  * Bottom Tab
@@ -1418,13 +1677,11 @@ type BottomTabProps = {
         | "mic-outline"
         | "settings-outline";
 
-    label:
-        string;
+    label: string;
 
     onPress?:
         () => void;
 };
-
 
 function BottomTab({
                        icon,
@@ -1444,12 +1701,9 @@ function BottomTab({
                 name={
                     icon
                 }
-                size={
-                    27
-                }
+                size={27}
                 color="#111111"
             />
-
 
             <Text
                 style={
@@ -1464,7 +1718,6 @@ function BottomTab({
     );
 }
 
-
 /*
  * =====================================================
  * Styles
@@ -1474,412 +1727,212 @@ function BottomTab({
 const styles =
     StyleSheet.create({
         safeArea: {
-            flex:
-                1,
-
+            flex: 1,
             backgroundColor:
             Colors.background,
         },
 
-
         container: {
-            flex:
-                1,
-
+            flex: 1,
             backgroundColor:
                 "#FFFFFF",
         },
-
 
         topBar: {
-            height:
-                70,
-
-            paddingHorizontal:
-                24,
-
-            flexDirection:
-                "row",
-
-            alignItems:
-                "center",
-
+            height: 70,
+            paddingHorizontal: 24,
+            flexDirection: "row",
+            alignItems: "center",
             justifyContent:
                 "space-between",
-
             backgroundColor:
                 "#FFFFFF",
         },
 
-
         loginText: {
-            fontSize:
-                18,
-
-            fontWeight:
-                "600",
-
-            color:
-                "#111111",
+            fontSize: 18,
+            fontWeight: "600",
+            color: "#111111",
         },
-
 
         homeScroll: {
-            flex:
-                1,
+            flex: 1,
         },
-
 
         homeScrollContent: {
-            paddingBottom:
-                32,
+            paddingBottom: 32,
         },
-
 
         dateArea: {
-            paddingHorizontal:
-                24,
-
-            marginTop:
-                16,
+            paddingHorizontal: 24,
+            marginTop: 16,
         },
-
 
         dateText: {
-            fontSize:
-                28,
-
-            lineHeight:
-                38,
-
-            fontWeight:
-                "700",
-
-            color:
-                "#111111",
+            fontSize: 28,
+            lineHeight: 38,
+            fontWeight: "700",
+            color: "#111111",
         },
-
 
         subText: {
-            marginTop:
-                8,
-
-            fontSize:
-                17,
-
-            lineHeight:
-                26,
-
-            color:
-                "#777B84",
+            marginTop: 8,
+            fontSize: 17,
+            lineHeight: 26,
+            color: "#777B84",
         },
-
 
         guestBanner: {
-            marginTop:
-                24,
-
-            marginHorizontal:
-                24,
-
-            height:
-                56,
-
-            paddingHorizontal:
-                16,
-
-            borderRadius:
-                12,
-
+            marginTop: 24,
+            marginHorizontal: 24,
+            height: 56,
+            paddingHorizontal: 16,
+            borderRadius: 12,
             backgroundColor:
                 "#FFF4F4",
-
-            flexDirection:
-                "row",
-
-            alignItems:
-                "center",
-
+            flexDirection: "row",
+            alignItems: "center",
             justifyContent:
                 "space-between",
         },
-
 
         guestBannerText: {
-            fontSize:
-                14,
-
-            fontWeight:
-                "500",
-
-            color:
-                "#444444",
+            fontSize: 14,
+            fontWeight: "500",
+            color: "#444444",
         },
-
 
         guestBannerArrow: {
-            fontSize:
-                22,
-
-            color:
-                "#666666",
+            fontSize: 22,
+            color: "#666666",
         },
 
-
         scheduleHeader: {
-            marginTop:
-                40,
-
-            paddingHorizontal:
-                24,
-
-            flexDirection:
-                "row",
-
-            alignItems:
-                "center",
-
+            marginTop: 40,
+            paddingHorizontal: 24,
+            flexDirection: "row",
+            alignItems: "center",
             justifyContent:
                 "space-between",
         },
 
-
         scheduleTitle: {
-            fontSize:
-                20,
-
-            fontWeight:
-                "700",
-
-            color:
-                "#111111",
+            fontSize: 20,
+            fontWeight: "700",
+            color: "#111111",
         },
-
 
         deviceText: {
-            fontSize:
-                13,
-
-            color:
-                "#8A8E96",
+            fontSize: 13,
+            color: "#8A8E96",
         },
-
 
         filterRow: {
-            marginTop:
-                22,
-
-            paddingHorizontal:
-                24,
-
-            flexDirection:
-                "row",
-
-            gap:
-                12,
+            marginTop: 22,
+            paddingHorizontal: 24,
+            flexDirection: "row",
+            gap: 12,
         },
 
-
         filterButton: {
-            minWidth:
-                84,
-
-            height:
-                42,
-
-            paddingHorizontal:
-                20,
-
-            borderWidth:
-                1,
-
+            minWidth: 84,
+            height: 42,
+            paddingHorizontal: 20,
+            borderWidth: 1,
             borderColor:
                 "#E0E1E5",
-
-            borderRadius:
-                22,
-
-            alignItems:
-                "center",
-
-            justifyContent:
-                "center",
-
+            borderRadius: 22,
+            alignItems: "center",
+            justifyContent: "center",
             backgroundColor:
                 "#F8F8F9",
         },
 
-
         filterButtonSelected: {
             backgroundColor:
                 "#111111",
-
             borderColor:
                 "#111111",
         },
 
-
         filterText: {
-            fontSize:
-                15,
-
-            color:
-                "#52555C",
+            fontSize: 15,
+            color: "#52555C",
         },
-
 
         filterTextSelected: {
-            color:
-                "#FFFFFF",
-
-            fontWeight:
-                "600",
+            color: "#FFFFFF",
+            fontWeight: "600",
         },
-
 
         scheduleList: {
-            paddingHorizontal:
-                24,
-
-            paddingTop:
-                24,
-
-            gap:
-                12,
+            paddingHorizontal: 24,
+            paddingTop: 24,
+            gap: 12,
         },
-
 
         emptyArea: {
-            minHeight:
-                380,
-
-            paddingHorizontal:
-                24,
-
-            alignItems:
-                "center",
-
-            justifyContent:
-                "center",
-
-            paddingBottom:
-                60,
+            minHeight: 380,
+            paddingHorizontal: 24,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingBottom: 60,
         },
-
 
         filteredEmptyArea: {
-            minHeight:
-                260,
-
-            paddingHorizontal:
-                24,
-
-            alignItems:
-                "center",
-
-            justifyContent:
-                "center",
+            minHeight: 260,
+            paddingHorizontal: 24,
+            alignItems: "center",
+            justifyContent: "center",
         },
-
 
         emptyText: {
-            marginTop:
-                28,
-
-            fontSize:
-                16,
-
-            color:
-                "#8A8E96",
+            marginTop: 28,
+            fontSize: 16,
+            color: "#8A8E96",
         },
-
 
         addButton: {
-            width:
-                "100%",
-
-            height:
-                56,
-
-            marginTop:
-                42,
-
-            borderRadius:
-                4,
-
+            width: "100%",
+            height: 56,
+            marginTop: 42,
+            borderRadius: 4,
             backgroundColor:
                 "#111111",
-
-            alignItems:
-                "center",
-
-            justifyContent:
-                "center",
+            alignItems: "center",
+            justifyContent: "center",
         },
-
 
         addButtonText: {
-            fontSize:
-                17,
-
-            fontWeight:
-                "600",
-
-            color:
-                "#FFFFFF",
+            fontSize: 17,
+            fontWeight: "600",
+            color: "#FFFFFF",
         },
-
 
         bottomNavigation: {
-            height:
-                94,
-
-            borderTopWidth:
-                1,
-
+            height: 94,
+            borderTopWidth: 1,
             borderTopColor:
                 "#E5E5E5",
-
-            flexDirection:
-                "row",
-
-            alignItems:
-                "center",
-
+            flexDirection: "row",
+            alignItems: "center",
             justifyContent:
                 "space-around",
-
             backgroundColor:
                 "#FFFFFF",
-
-            paddingBottom:
-                8,
+            paddingBottom: 8,
         },
-
 
         bottomTab: {
-            flex:
-                1,
-
-            alignItems:
-                "center",
-
-            justifyContent:
-                "center",
-
-            gap:
-                7,
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 7,
         },
 
-
         bottomTabText: {
-            fontSize:
-                12,
-
-            fontWeight:
-                "600",
-
-            color:
-                "#111111",
+            fontSize: 12,
+            fontWeight: "600",
+            color: "#111111",
         },
     });
