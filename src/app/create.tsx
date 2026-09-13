@@ -4,40 +4,53 @@ import {
     Text,
     View,
 } from "react-native";
-import { useState } from "react";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
-import { DirectInputSheet } from "@/components/schedule/DirectInputSheet";
+export default function CreateScreen() {
+    /*
+     * AI 음성 일정 입력 시작
+     *
+     * 실제 녹음 및 AI 분석 기능은
+     * 음성 일정 생성 Issue에서 구현합니다.
+     */
+    const handleStartVoiceInput = () => {
+        console.log(
+            "음성 입력 시작 - 추후 구현"
+        );
+    };
 
-export default function CreateScheduleScreen() {
-    const [isDirectInputOpen, setIsDirectInputOpen] =
-        useState(false);
-
-    const handleStartVoice = () => {
-        // 추후 마이크 권한 + 음성 입력 기능 연결
-        console.log("음성 입력 시작");
+    /*
+     * 직접 입력은 별도의 화면으로 분리합니다.
+     *
+     * 비회원 / 무료회원 / 유료회원 모두
+     * 직접 입력 자체는 사용할 수 있습니다.
+     */
+    const handleDirectInput = () => {
+        router.push("/create-manual");
     };
 
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.container}>
-                {/* 뒤로가기 */}
-                <Pressable
-                    style={styles.backButton}
-                    onPress={() => router.back()}
-                    hitSlop={10}
-                >
-                    <Ionicons
-                        name="chevron-back"
-                        size={28}
-                        color="#111111"
-                    />
-                </Pressable>
+                {/* 상단 */}
+                <View style={styles.header}>
+                    <Pressable
+                        onPress={() => router.back()}
+                        hitSlop={12}
+                    >
+                        <Ionicons
+                            name="chevron-back"
+                            size={28}
+                            color="#111111"
+                        />
+                    </Pressable>
+                </View>
 
-                {/* 본문 */}
-                <View style={styles.content}>
+                {/* 제목 */}
+                <View style={styles.titleArea}>
                     <Text style={styles.title}>
                         음성으로 일정 추가
                     </Text>
@@ -45,22 +58,24 @@ export default function CreateScheduleScreen() {
                     <Text style={styles.subtitle}>
                         어떤 일정이 있나요?
                     </Text>
+                </View>
 
-                    {/* 음성 입력 예시 */}
-                    <View style={styles.exampleBox}>
-                        <Text style={styles.exampleText}>
-                            “내일 오후 3시 30분에{"\n"}
-                            치과에 갈 거야.{"\n"}
-                            30분 전에 알려줘.”
-                        </Text>
-                    </View>
+                {/* 음성 예시 */}
+                <View style={styles.exampleBox}>
+                    <Text style={styles.exampleText}>
+                        “내일 오후 3시 30분에{"\n"}
+                        치과에 갈 거야.{"\n"}
+                        30분 전에 알려줘.”
+                    </Text>
+                </View>
 
-                    {/* 마이크 */}
+                {/* 마이크 */}
+                <View style={styles.voiceArea}>
                     <View style={styles.micOuter}>
                         <View style={styles.micInner}>
                             <Ionicons
                                 name="mic-outline"
-                                size={58}
+                                size={52}
                                 color="#111111"
                             />
                         </View>
@@ -71,7 +86,7 @@ export default function CreateScheduleScreen() {
                 <View style={styles.bottomArea}>
                     <Pressable
                         style={styles.voiceButton}
-                        onPress={handleStartVoice}
+                        onPress={handleStartVoiceInput}
                     >
                         <Text style={styles.voiceButtonText}>
                             음성 입력 시작
@@ -79,20 +94,14 @@ export default function CreateScheduleScreen() {
                     </Pressable>
 
                     <Pressable
-                        style={styles.directButton}
-                        onPress={() => setIsDirectInputOpen(true)}
+                        style={styles.manualButton}
+                        onPress={handleDirectInput}
                     >
-                        <Text style={styles.directButtonText}>
+                        <Text style={styles.manualButtonText}>
                             직접 입력
                         </Text>
                     </Pressable>
                 </View>
-
-                {/* 직접 입력 Bottom Sheet */}
-                <DirectInputSheet
-                    visible={isDirectInputOpen}
-                    onClose={() => setIsDirectInputOpen(false)}
-                />
             </View>
         </SafeAreaView>
     );
@@ -106,27 +115,19 @@ const styles = StyleSheet.create({
 
     container: {
         flex: 1,
+        paddingHorizontal: 24,
         backgroundColor: "#FFFFFF",
     },
 
-    backButton: {
-        position: "absolute",
-        top: 16,
-        left: 20,
-        zIndex: 10,
-
-        width: 40,
-        height: 40,
-
+    header: {
+        height: 64,
         justifyContent: "center",
+        alignItems: "flex-start",
     },
 
-    content: {
-        flex: 1,
+    titleArea: {
+        marginTop: 26,
         alignItems: "center",
-
-        paddingHorizontal: 24,
-        paddingTop: 100,
     },
 
     title: {
@@ -134,76 +135,68 @@ const styles = StyleSheet.create({
         lineHeight: 38,
         fontWeight: "700",
         color: "#111111",
+        textAlign: "center",
     },
 
     subtitle: {
-        marginTop: 12,
-
+        marginTop: 10,
         fontSize: 16,
         lineHeight: 24,
-        color: "#8A8E96",
+        color: "#92959C",
+        textAlign: "center",
     },
 
     exampleBox: {
-        width: "100%",
-
-        marginTop: 52,
-        paddingHorizontal: 20,
+        marginTop: 46,
+        minHeight: 122,
+        paddingHorizontal: 24,
         paddingVertical: 22,
-
-        borderRadius: 16,
-
+        borderRadius: 14,
         backgroundColor: "#F5F5F6",
+        alignItems: "center",
+        justifyContent: "center",
     },
 
     exampleText: {
+        fontSize: 17,
+        lineHeight: 27,
+        color: "#55585F",
         textAlign: "center",
+    },
 
-        fontSize: 18,
-        lineHeight: 28,
-        color: "#4D5057",
+    voiceArea: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
     },
 
     micOuter: {
-        width: 184,
-        height: 184,
-
-        marginTop: 28,
-
-        borderRadius: 92,
-
-        backgroundColor: "#F8D2CB",
-
+        width: 174,
+        height: 174,
+        borderRadius: 87,
+        backgroundColor: "#F8CDCA",
         alignItems: "center",
         justifyContent: "center",
     },
 
     micInner: {
-        width: 148,
-        height: 148,
-
-        borderRadius: 74,
-
+        width: 142,
+        height: 142,
+        borderRadius: 71,
         backgroundColor: "#FFFFFF",
-
         alignItems: "center",
         justifyContent: "center",
     },
 
     bottomArea: {
-        paddingHorizontal: 24,
-        paddingBottom: 20,
-
-        gap: 14,
+        paddingBottom: 16,
+        gap: 12,
     },
 
     voiceButton: {
         height: 56,
-
         borderRadius: 4,
-
         backgroundColor: "#111111",
-
         alignItems: "center",
         justifyContent: "center",
     },
@@ -214,20 +207,17 @@ const styles = StyleSheet.create({
         color: "#FFFFFF",
     },
 
-    directButton: {
+    manualButton: {
         height: 56,
-
-        borderWidth: 1,
-        borderColor: "#9A9EA8",
         borderRadius: 4,
-
+        borderWidth: 1,
+        borderColor: "#BFC1C6",
         backgroundColor: "#FFFFFF",
-
         alignItems: "center",
         justifyContent: "center",
     },
 
-    directButtonText: {
+    manualButtonText: {
         fontSize: 17,
         fontWeight: "600",
         color: "#111111",
