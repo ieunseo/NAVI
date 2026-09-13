@@ -27,6 +27,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 import { ScheduleCard } from "@/components/home/ScheduleCard";
+import { ScheduleInfoModal } from "@/components/home/ScheduleInfoModal";
+
 import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
 import { AppErrorScreen } from "@/components/ui/AppErrorScreen";
 import { LoginRequiredModal } from "@/components/auth/LoginRequiredModal";
@@ -38,25 +40,29 @@ import { LoginRequiredModal } from "@/components/auth/LoginRequiredModal";
  * =====================================================
  */
 
+type RepeatType =
+    | "none"
+    | "daily"
+    | "weekday"
+    | "weekly";
 
-/*
- * Home에서 사용하는 로컬 일정 타입
- *
- * 추후 Supabase tasks 테이블 연동 시
- * 서버 데이터를 이 형태로 변환해서 사용할 수 있습니다.
- */
+
 type LocalSchedule = {
     id: string;
 
     title: string;
 
-    /*
-     * 기존에 저장된 일정에는 memo가 없을 수 있으므로
-     * optional로 처리합니다.
-     */
     memo?: string | null;
 
     scheduledAt: string;
+
+    /*
+     * 기존 일정에는 repeatType이 없을 수 있으므로
+     * optional로 처리합니다.
+     *
+     * 값이 없으면 반복 없음으로 해석합니다.
+     */
+    repeatType?: RepeatType;
 
     status:
         | "pending"
@@ -96,14 +102,27 @@ const WEEKDAYS = [
 ];
 
 
+function createTodayDate(
+    hour: number,
+    minute: number
+) {
+    const date =
+        new Date();
+
+    date.setHours(
+        hour,
+        minute,
+        0,
+        0
+    );
+
+    return date;
+}
+
+
 /*
  * =====================================================
  * [개발용 테스트 데이터]
- *
- * Home의 "일정 있음" 상태 확인용 데이터입니다.
- *
- * 실제 출시 전에는
- * 개발용 테스트 영역과 함께 삭제합니다.
  * =====================================================
  */
 
@@ -124,6 +143,9 @@ const TEST_SCHEDULES:
                 10,
                 0
             ).toISOString(),
+
+        repeatType:
+            "none",
 
         status:
             "pending",
@@ -146,13 +168,16 @@ const TEST_SCHEDULES:
             "책 읽기",
 
         memo:
-            null,
+            "30페이지 읽기",
 
         scheduledAt:
             createTodayDate(
                 20,
                 0
             ).toISOString(),
+
+        repeatType:
+            "daily",
 
         status:
             "pending",
@@ -161,7 +186,7 @@ const TEST_SCHEDULES:
             false,
 
         reminderMinutes:
-            null,
+            30,
 
         localNotificationId:
             null,
@@ -169,31 +194,6 @@ const TEST_SCHEDULES:
 ];
 
 
-/*
- * 오늘 날짜 기준으로
- * 테스트용 시간을 생성합니다.
- */
-function createTodayDate(
-    hour: number,
-    minute: number
-) {
-    const date =
-        new Date();
-
-    date.setHours(
-        hour,
-        minute,
-        0,
-        0
-    );
-
-    return date;
-}
-
-
-/*
- * Home 상단 날짜 문자열
- */
 function getTodayText() {
     const today =
         new Date();
@@ -220,17 +220,6 @@ function getTodayText() {
  * =====================================================
  */
 
-
-/*
- * 현재 사용자에 맞는
- * 로컬 일정 저장 Key를 생성합니다.
- *
- * 비회원:
- * navi_local_schedules:guest
- *
- * 회원:
- * navi_local_schedules:{userId}
- */
 function getScheduleStorageKey(
     userId?: string
 ) {
@@ -246,10 +235,6 @@ function getScheduleStorageKey(
  * =====================================================
  */
 
-
-/*
- * 해당 일정이 오늘 일정인지 확인합니다.
- */
 function isTodaySchedule(
     schedule: LocalSchedule
 ) {
@@ -274,10 +259,6 @@ function isTodaySchedule(
 }
 
 
-/*
- * 일정 시간을
- * 오전 / 오후로 구분합니다.
- */
 function getSchedulePeriod(
     schedule: LocalSchedule
 ):
@@ -294,10 +275,6 @@ function getSchedulePeriod(
 }
 
 
-/*
- * ISO 날짜를
- * Home 카드용 오전/오후 시간 문자열로 변환합니다.
- */
 function formatScheduleTime(
     scheduledAt: string
 ) {
@@ -331,10 +308,6 @@ function formatScheduleTime(
 }
 
 
-/*
- * 일정 status 값을
- * Home 표시 문자열로 변환합니다.
- */
 function getScheduleStatusText(
     schedule: LocalSchedule
 ) {
@@ -362,18 +335,6 @@ function getScheduleStatusText(
 /*
  * =====================================================
  * [개발용 Home 일정 상태 테스트]
- *
- * "real"
- * → 실제 AsyncStorage 일정 사용
- *
- * "empty"
- * → 강제로 일정 0개
- *
- * "with-data"
- * → TEST_SCHEDULES 표시
- *
- * TypeScript가 "real" 하나로 타입을 좁히는 것을
- * 방지하기 위해 함수 반환값으로 사용합니다.
  * =====================================================
  */
 
@@ -409,10 +370,6 @@ export default function HomeScreen() {
         useAuth();
 
 
-    /*
-     * 회원 전용 기능 접근 시
-     * 로그인 여부를 확인하기 위한 공통 Hook
-     */
     const {
         requireAuth,
 
@@ -434,9 +391,6 @@ export default function HomeScreen() {
         );
 
 
-    /*
-     * 로컬 일정 로딩 여부
-     */
     const [
         loadingSchedules,
         setLoadingSchedules,
@@ -446,10 +400,6 @@ export default function HomeScreen() {
         );
 
 
-    /*
-     * 현재 사용자 / 비회원의
-     * 로컬 일정 목록
-     */
     const [
         schedules,
         setSchedules,
@@ -476,18 +426,36 @@ export default function HomeScreen() {
 
     /*
      * =====================================================
+     * 일정 정보 Popup
+     * =====================================================
+     */
+
+    const [
+        selectedSchedule,
+        setSelectedSchedule,
+    ] =
+        useState<
+            LocalSchedule | null
+        >(
+            null
+        );
+
+
+    const [
+        scheduleInfoVisible,
+        setScheduleInfoVisible,
+    ] =
+        useState(
+            false
+        );
+
+
+    /*
+     * =====================================================
      * 권한 온보딩
      * =====================================================
      */
 
-
-    /*
-     * 최초 앱 진입 시 권한 온보딩 완료 여부 확인
-     *
-     * permission_onboarding_completed 값이 없으면
-     * 아직 권한 안내를 완료하지 않은 사용자이므로
-     * permissions 화면으로 이동합니다.
-     */
     useEffect(
         () => {
             let mounted =
@@ -535,10 +503,6 @@ export default function HomeScreen() {
                         );
 
 
-                        /*
-                         * AsyncStorage 확인에 실패했다고 해서
-                         * 앱 사용 자체를 막지는 않습니다.
-                         */
                         if (
                             mounted
                         ) {
@@ -574,9 +538,6 @@ export default function HomeScreen() {
      * false
      * → 정상 앱 흐름
      *
-     * 평소 개발 시 false로 두고,
-     * 오류 화면 UI 확인이 필요할 때만 true로 변경합니다.
-     *
      * ⚠️ 실제 출시 전에는 이 블록 전체를 삭제합니다.
      * =====================================================
      */
@@ -589,9 +550,6 @@ export default function HomeScreen() {
      * [개발용 테스트 코드]
      *
      * 비회원 상태 테스트를 위한 임시 로그아웃 기능입니다.
-     *
-     * 로그인 상태에서 왼쪽 상단 닉네임을 누르면
-     * 현재 Supabase Session을 로그아웃합니다.
      *
      * ⚠️ 실제 출시 전에는 이 블록 전체를 삭제합니다.
      */
@@ -635,19 +593,6 @@ export default function HomeScreen() {
      * =====================================================
      */
 
-
-    /*
-     * 현재 사용자에 맞는 로컬 일정을 불러옵니다.
-     *
-     * session 없음
-     * → guest 일정
-     *
-     * session 있음
-     * → 해당 user.id 전용 일정
-     *
-     * 로그인 / 로그아웃으로 session이 변경될 때마다
-     * 자동으로 다시 불러옵니다.
-     */
     const loadSchedules =
         useCallback(
             async () => {
@@ -657,9 +602,6 @@ export default function HomeScreen() {
 
 
                 try {
-                    /*
-                     * 개발용 강제 Empty State
-                     */
                     if (
                         HOME_SCHEDULE_STATE_FOR_TEST ===
                         "empty"
@@ -672,9 +614,6 @@ export default function HomeScreen() {
                     }
 
 
-                    /*
-                     * 개발용 강제 일정 있음 상태
-                     */
                     if (
                         HOME_SCHEDULE_STATE_FOR_TEST ===
                         "with-data"
@@ -687,9 +626,6 @@ export default function HomeScreen() {
                     }
 
 
-                    /*
-                     * 실제 앱 흐름
-                     */
                     const storageKey =
                         getScheduleStorageKey(
                             session
@@ -718,7 +654,7 @@ export default function HomeScreen() {
                     const parsedSchedules =
                         JSON.parse(
                             storedSchedules
-                        ) as LocalSchedule[];
+                        );
 
 
                     if (
@@ -734,8 +670,27 @@ export default function HomeScreen() {
                     }
 
 
+                    /*
+                     * 기존 데이터에는 repeatType이
+                     * 없을 수 있으므로 기본값 보정
+                     */
+                    const normalizedSchedules:
+                        LocalSchedule[] =
+                        parsedSchedules.map(
+                            (
+                                schedule
+                            ) => ({
+                                ...schedule,
+
+                                repeatType:
+                                    schedule.repeatType ??
+                                    "none",
+                            })
+                        );
+
+
                     setSchedules(
-                        parsedSchedules
+                        normalizedSchedules
                     );
                 } catch (
                     error
@@ -746,11 +701,6 @@ export default function HomeScreen() {
                     );
 
 
-                    /*
-                     * 로컬 일정 읽기 실패 시
-                     * Home 자체를 막지 않고
-                     * Empty State로 표시합니다.
-                     */
                     setSchedules(
                         []
                     );
@@ -778,9 +728,6 @@ export default function HomeScreen() {
     );
 
 
-    /*
-     * 오늘 일정만 Home에 표시합니다.
-     */
     const todaySchedules =
         schedules
             .filter(
@@ -800,9 +747,6 @@ export default function HomeScreen() {
             );
 
 
-    /*
-     * 오전 / 오후 필터 적용
-     */
     const filteredSchedules =
         selectedFilter ===
         "전체"
@@ -821,6 +765,79 @@ export default function HomeScreen() {
 
     const scheduleCount =
         todaySchedules.length;
+
+
+    /*
+     * =====================================================
+     * 일정 정보 Popup
+     * =====================================================
+     */
+
+    const handleSchedulePress =
+        (
+            schedule:
+            LocalSchedule
+        ) => {
+            console.log(
+                "일정 선택:",
+                schedule.id
+            );
+
+
+            setSelectedSchedule(
+                schedule
+            );
+
+
+            setScheduleInfoVisible(
+                true
+            );
+        };
+
+
+    const closeScheduleInfo =
+        () => {
+            setScheduleInfoVisible(
+                false
+            );
+        };
+
+
+    /*
+     * 수정 화면은 다음 Task에서 구현합니다.
+     *
+     * 현재는 연필 버튼이 정상적으로
+     * 눌리는지만 확인합니다.
+     */
+    const handleEditSchedule =
+        (
+            schedule:
+            LocalSchedule
+        ) => {
+            console.log(
+                "일정 수정 선택:",
+                schedule.id
+            );
+
+
+            setScheduleInfoVisible(
+                false
+            );
+
+
+            /*
+             * TODO
+             *
+             * 일정 수정 화면 구현 후:
+             *
+             * router.push({
+             *     pathname: "/schedule-edit",
+             *     params: {
+             *         scheduleId: schedule.id,
+             *     },
+             * });
+             */
+        };
 
 
     /*
@@ -850,13 +867,6 @@ export default function HomeScreen() {
      * =====================================================
      */
 
-
-    /*
-     * Supabase Session 복구 /
-     * 권한 온보딩 상태 /
-     * 로컬 일정 로딩 중에는
-     * Loading 화면을 표시합니다.
-     */
     if (
         loading ||
         checkingPermissionOnboarding ||
@@ -868,10 +878,6 @@ export default function HomeScreen() {
     }
 
 
-    /*
-     * Supabase Auth 초기화 중 오류가 발생한 경우
-     * 오류 화면을 표시하고 다시 시도할 수 있게 합니다.
-     */
     if (
         authError
     ) {
@@ -894,7 +900,6 @@ export default function HomeScreen() {
      * =====================================================
      */
 
-
     const handleLogin =
         () => {
             router.push(
@@ -903,12 +908,6 @@ export default function HomeScreen() {
         };
 
 
-    /*
-     * 직접 일정 입력
-     *
-     * 비회원 / 회원 모두
-     * 직접 입력은 사용할 수 있습니다.
-     */
     const handleManualInput =
         () => {
             router.push(
@@ -917,25 +916,6 @@ export default function HomeScreen() {
         };
 
 
-    /*
-     * AI 음성 입력
-     *
-     * 현재 단계:
-     *
-     * 비회원
-     * → 로그인 안내 모달
-     *
-     * 로그인 회원
-     * → /create
-     *
-     * 추후 user_access 연동 시:
-     *
-     * 무료회원
-     * → 구독 안내
-     *
-     * 유료회원
-     * → /create
-     */
     const handleVoiceInput =
         () => {
             requireAuth(
@@ -948,10 +928,6 @@ export default function HomeScreen() {
         };
 
 
-    /*
-     * 로그인 안내 모달에서
-     * 직접 입력을 선택한 경우
-     */
     const handleDirectInputFromLoginModal =
         () => {
             closeLoginRequired();
@@ -981,21 +957,12 @@ export default function HomeScreen() {
                         styles.container
                     }
                 >
-                    {/*
-                     * =====================================================
-                     * 상단 고정 영역
-                     * =====================================================
-                     */}
-
                     <View
                         style={
                             styles.topBar
                         }
                     >
                         {!session ? (
-                            /*
-                             * 비회원 상태
-                             */
                             <Pressable
                                 onPress={
                                     handleLogin
@@ -1013,12 +980,6 @@ export default function HomeScreen() {
                                 </Text>
                             </Pressable>
                         ) : (
-                            /*
-                             * 회원 상태
-                             *
-                             * 현재 개발 중에는
-                             * 닉네임 클릭 시 로그아웃됩니다.
-                             */
                             <Pressable
                                 onPress={
                                     handleLogoutForTest
@@ -1061,17 +1022,6 @@ export default function HomeScreen() {
                     </View>
 
 
-                    {/*
-                     * =====================================================
-                     * Home Scroll 영역
-                     *
-                     * 날짜 / 게스트 배너 / 일정 헤더 /
-                     * 필터 / 일정 목록이 모두 함께 스크롤됩니다.
-                     *
-                     * 상단 Bar와 하단 Navigation은 고정됩니다.
-                     * =====================================================
-                     */}
-
                     <ScrollView
                         style={
                             styles.homeScroll
@@ -1083,7 +1033,6 @@ export default function HomeScreen() {
                             false
                         }
                     >
-                        {/* 날짜 */}
                         <View
                             style={
                                 styles.dateArea
@@ -1110,7 +1059,6 @@ export default function HomeScreen() {
                         </View>
 
 
-                        {/* 비회원 전용 배너 */}
                         {!session && (
                             <Pressable
                                 style={
@@ -1140,7 +1088,6 @@ export default function HomeScreen() {
                         )}
 
 
-                        {/* 일정 헤더 */}
                         <View
                             style={
                                 styles.scheduleHeader
@@ -1168,7 +1115,6 @@ export default function HomeScreen() {
                         </View>
 
 
-                        {/* 일정이 있는 경우에만 필터 표시 */}
                         {scheduleCount >
                             0 && (
                                 <View
@@ -1220,7 +1166,6 @@ export default function HomeScreen() {
                             )}
 
 
-                        {/* 일정 없음 */}
                         {scheduleCount ===
                         0 ? (
                             <View
@@ -1265,10 +1210,6 @@ export default function HomeScreen() {
                             </View>
                         ) : filteredSchedules.length ===
                         0 ? (
-                            /*
-                             * 일정은 존재하지만
-                             * 선택한 오전/오후 시간대에는 없는 경우
-                             */
                             <View
                                 style={
                                     styles.filteredEmptyArea
@@ -1292,9 +1233,6 @@ export default function HomeScreen() {
                                 </Text>
                             </View>
                         ) : (
-                            /*
-                             * 일정 있음
-                             */
                             <View
                                 style={
                                     styles.scheduleList
@@ -1324,13 +1262,18 @@ export default function HomeScreen() {
                                             completed={
                                                 schedule.completed
                                             }
-                                            onPress={() => {
-                                                console.log(
-                                                    "일정 선택:",
-                                                    schedule.id
-                                                );
-                                            }}
+                                            onPress={() =>
+                                                handleSchedulePress(
+                                                    schedule
+                                                )
+                                            }
                                             onToggle={() => {
+                                                /*
+                                                 * 기존 왼쪽 Swipe
+                                                 * 완료 / 대기 변경 로직을
+                                                 * 현재 ScheduleCard에서
+                                                 * 그대로 사용합니다.
+                                                 */
                                                 console.log(
                                                     "완료 상태 변경:",
                                                     schedule.id
@@ -1343,12 +1286,6 @@ export default function HomeScreen() {
                         )}
                     </ScrollView>
 
-
-                    {/*
-                     * =====================================================
-                     * 하단 Navigation 고정
-                     * =====================================================
-                     */}
 
                     <View
                         style={
@@ -1379,10 +1316,6 @@ export default function HomeScreen() {
             </SafeAreaView>
 
 
-            {/*
-             * 비회원이 음성 입력을 선택했을 때
-             * 표시하는 로그인 안내 모달
-             */}
             <LoginRequiredModal
                 visible={
                     loginRequiredVisible
@@ -1395,6 +1328,28 @@ export default function HomeScreen() {
                 }
                 onLogin={
                     goToLogin
+                }
+            />
+
+
+            {/*
+             * =====================================================
+             * 일정 정보 Popup
+             * =====================================================
+             */}
+
+            <ScheduleInfoModal
+                visible={
+                    scheduleInfoVisible
+                }
+                schedule={
+                    selectedSchedule
+                }
+                onClose={
+                    closeScheduleInfo
+                }
+                onEdit={
+                    handleEditSchedule
                 }
             />
         </>
@@ -1536,12 +1491,6 @@ const styles =
         },
 
 
-        /*
-         * =====================================================
-         * 상단 고정 영역
-         * =====================================================
-         */
-
         topBar: {
             height:
                 70,
@@ -1574,12 +1523,6 @@ const styles =
                 "#111111",
         },
 
-
-        /*
-         * =====================================================
-         * Scroll 영역
-         * =====================================================
-         */
 
         homeScroll: {
             flex:
@@ -1632,12 +1575,6 @@ const styles =
         },
 
 
-        /*
-         * =====================================================
-         * 비회원 Banner
-         * =====================================================
-         */
-
         guestBanner: {
             marginTop:
                 24,
@@ -1689,12 +1626,6 @@ const styles =
         },
 
 
-        /*
-         * =====================================================
-         * 일정 Header
-         * =====================================================
-         */
-
         scheduleHeader: {
             marginTop:
                 40,
@@ -1733,12 +1664,6 @@ const styles =
                 "#8A8E96",
         },
 
-
-        /*
-         * =====================================================
-         * Filter
-         * =====================================================
-         */
 
         filterRow: {
             marginTop:
@@ -1812,15 +1737,6 @@ const styles =
         },
 
 
-        /*
-         * =====================================================
-         * 일정 목록
-         *
-         * ScrollView 내부이므로
-         * flex: 1을 사용하지 않습니다.
-         * =====================================================
-         */
-
         scheduleList: {
             paddingHorizontal:
                 24,
@@ -1832,12 +1748,6 @@ const styles =
                 12,
         },
 
-
-        /*
-         * =====================================================
-         * Empty State
-         * =====================================================
-         */
 
         emptyArea: {
             minHeight:
@@ -1919,12 +1829,6 @@ const styles =
                 "#FFFFFF",
         },
 
-
-        /*
-         * =====================================================
-         * 하단 Navigation
-         * =====================================================
-         */
 
         bottomNavigation: {
             height:
