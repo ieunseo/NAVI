@@ -6,14 +6,16 @@ import {
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { Colors } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
 import { ScheduleCard } from "@/components/home/ScheduleCard";
 import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
+import { STORAGE_KEYS } from "@/constants/storageKeys";
 
 const WEEKDAYS = [
     "일요일",
@@ -58,6 +60,30 @@ export default function HomeScreen() {
     const todayText = getTodayText();
     const { session, loading } = useAuth();
 
+    useEffect(() => {
+        const checkPermissionOnboarding = async () => {
+            try {
+                const completed = await AsyncStorage.getItem(
+                    STORAGE_KEYS.permissionOnboardingCompleted
+                );
+
+                if (completed !== "true") {
+                    router.replace("/permissions");
+                    return;
+                }
+            } catch (error) {
+                console.error(
+                    "권한 온보딩 상태 확인 오류:",
+                    error
+                );
+            } finally {
+                setCheckingPermissionOnboarding(false);
+            }
+        };
+
+        checkPermissionOnboarding();
+    }, []);
+
     const [selectedFilter, setSelectedFilter] = useState<"전체" | "오전" | "오후">("전체");
 
     const filteredSchedules =
@@ -67,7 +93,11 @@ export default function HomeScreen() {
 
     const scheduleCount = schedules.length;
 
-    if (loading) {
+
+    const [checkingPermissionOnboarding, setCheckingPermissionOnboarding] =
+        useState(true);
+
+    if (loading || checkingPermissionOnboarding) {
         return <AppLoadingScreen />;
     }
 

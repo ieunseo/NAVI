@@ -30,6 +30,10 @@ import {
     type NotificationPermissionsStatus,
 } from "expo-notifications/build/NotificationPermissions.types";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { STORAGE_KEYS } from "@/constants/storageKeys";
+
 const LOCAL_NOTIFICATION_CHANNEL_ID = "schedule-reminders";
 const IS_EXPO_GO = isRunningInExpoGo();
 const SETTINGS_APP_NAME = IS_EXPO_GO ? "Expo Go" : "NAVI";
@@ -76,9 +80,10 @@ function showSettingsAlert(title: string, message: string) {
 export default function PermissionsScreen() {
     const [microphoneBusy, setMicrophoneBusy] = useState(false);
     const [notificationBusy, setNotificationBusy] = useState(false);
+    const [startBusy, setStartBusy] = useState(false);
 
     const handleMicrophonePress = async () => {
-        if (microphoneBusy) return;
+        if (microphoneBusy || startBusy) return;
 
         setMicrophoneBusy(true);
 
@@ -138,7 +143,7 @@ export default function PermissionsScreen() {
     };
 
     const handleNotificationPress = async () => {
-        if (notificationBusy) return;
+        if (notificationBusy || startBusy) return;
 
         if (Platform.OS === "web") {
             Alert.alert(
@@ -151,12 +156,6 @@ export default function PermissionsScreen() {
         setNotificationBusy(true);
 
         try {
-            /*
-             * Expo Go에서는 사용자 지정 채널 생성 시
-             * SDK 57 네이티브 오류가 발생할 수 있습니다.
-             *
-             * 실제 NAVI 개발/배포 앱에서만 전용 채널을 생성합니다.
-             */
             if (
                 Platform.OS === "android" &&
                 !IS_EXPO_GO
@@ -190,13 +189,14 @@ export default function PermissionsScreen() {
                 return;
             }
 
-            const permission = await requestPermissionsAsync({
-                ios: {
-                    allowAlert: true,
-                    allowBadge: false,
-                    allowSound: true,
-                },
-            });
+            const permission =
+                await requestPermissionsAsync({
+                    ios: {
+                        allowAlert: true,
+                        allowBadge: false,
+                        allowSound: true,
+                    },
+                });
 
             if (isNotificationAllowed(permission)) {
                 Alert.alert(
@@ -233,9 +233,93 @@ export default function PermissionsScreen() {
         }
     };
 
-    const handleStart = () => {
-        router.replace("/");
+    const handleStart = async () => {
+        if (startBusy) return;
+
+        setStartBusy(true);
+
+        try {
+            /*
+             * 1. 마이크 권한 요청
+             */
+            const micPermission =
+                await getRecordingPermissionsAsync();
+
+            if (
+                !micPermission.granted &&
+                micPermission.canAskAgain
+            ) {
+                await requestRecordingPermissionsAsync();
+            }
+
+            /*
+             * 2. Android 실제 앱에서는
+             * 일정 알림용 Notification Channel 생성
+             */
+            if (
+                Platform.OS === "android" &&
+                !IS_EXPO_GO
+            ) {
+                await setNotificationChannelAsync(
+                    LOCAL_NOTIFICATION_CHANNEL_ID,
+                    {
+                        name: "일정 알림",
+                        importance: AndroidImportance.DEFAULT,
+                        sound: "default",
+                    }
+                );
+            }
+
+            /*
+             * 3. 알림 권한 요청
+             */
+            if (Platform.OS !== "web") {
+                const notificationPermission =
+                    await getPermissionsAsync();
+
+                if (
+                    !isNotificationAllowed(notificationPermission) &&
+                    notificationPermission.canAskAgain
+                ) {
+                    await requestPermissionsAsync({
+                        ios: {
+                            allowAlert: true,
+                            allowBadge: false,
+                            allowSound: true,
+                        },
+                    });
+                }
+            }
+
+            /*
+             * 4. 권한 허용/거부 여부와 상관없이
+             * 최초 권한 안내를 완료한 것으로 저장
+             */
+            await AsyncStorage.setItem(
+                STORAGE_KEYS.permissionOnboardingCompleted,
+                "true"
+            );
+
+            /*
+             * 5. Home 이동
+             */
+            router.replace("/");
+        } catch (error) {
+            console.error("권한 초기 설정 오류:", error);
+
+            Alert.alert(
+                "오류",
+                "권한 설정 중 문제가 발생했어요."
+            );
+        } finally {
+            setStartBusy(false);
+        }
     };
+
+    const isAnyBusy =
+        microphoneBusy ||
+        notificationBusy ||
+        startBusy;
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -254,13 +338,13 @@ export default function PermissionsScreen() {
                         <Pressable
                             style={[
                                 styles.permissionCard,
-                                microphoneBusy && styles.disabled,
+                                isAnyBusy && styles.disabled,
                             ]}
                             onPress={handleMicrophonePress}
-                            disabled={microphoneBusy}
+                            disabled={isAnyBusy}
                             accessibilityRole="button"
                             accessibilityState={{
-                                disabled: microphoneBusy,
+                                disabled: isAnyBusy,
                                 busy: microphoneBusy,
                             }}
                         >
@@ -278,12 +362,9 @@ export default function PermissionsScreen() {
                                 </Text>
 
                                 <Text
-                                    style={
-                                        styles.permissionDescription
-                                    }
+                                    style={styles.permissionDescription}
                                 >
-                                    음성으로 일정을 입력할 때
-                                    사용해요
+                                    음성으로 일정을 입력할 때 사용해요
                                 </Text>
                             </View>
 
@@ -297,14 +378,13 @@ export default function PermissionsScreen() {
                         <Pressable
                             style={[
                                 styles.permissionCard,
-                                notificationBusy &&
-                                styles.disabled,
+                                isAnyBusy && styles.disabled,
                             ]}
                             onPress={handleNotificationPress}
-                            disabled={notificationBusy}
+                            disabled={isAnyBusy}
                             accessibilityRole="button"
                             accessibilityState={{
-                                disabled: notificationBusy,
+                                disabled: isAnyBusy,
                                 busy: notificationBusy,
                             }}
                         >
@@ -322,12 +402,9 @@ export default function PermissionsScreen() {
                                 </Text>
 
                                 <Text
-                                    style={
-                                        styles.permissionDescription
-                                    }
+                                    style={styles.permissionDescription}
                                 >
-                                    기기에 저장한 일정이 다가오면
-                                    알려드려요
+                                    기기에 저장한 일정이 다가오면 알려드려요
                                 </Text>
                             </View>
 
@@ -342,17 +419,24 @@ export default function PermissionsScreen() {
 
                 <View style={styles.bottomArea}>
                     <Text style={styles.helperText}>
-                        허용하지 않아도 직접 입력으로 이용할 수
-                        있어요.
+                        허용하지 않아도 직접 입력으로 이용할 수 있어요.
                     </Text>
 
                     <Pressable
-                        style={styles.startButton}
+                        style={[
+                            styles.startButton,
+                            startBusy && styles.disabled,
+                        ]}
                         onPress={handleStart}
+                        disabled={startBusy}
                         accessibilityRole="button"
+                        accessibilityState={{
+                            disabled: startBusy,
+                            busy: startBusy,
+                        }}
                     >
                         <Text style={styles.startButtonText}>
-                            시작하기
+                            {startBusy ? "설정 중..." : "시작하기"}
                         </Text>
                     </Pressable>
                 </View>
@@ -366,31 +450,37 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#FFFFFF",
     },
+
     container: {
         flex: 1,
         paddingHorizontal: 24,
         backgroundColor: "#FFFFFF",
     },
+
     content: {
         flex: 1,
         paddingTop: 54,
     },
+
     title: {
         fontSize: 26,
         lineHeight: 36,
         fontWeight: "700",
         color: "#111111",
     },
+
     description: {
         marginTop: 14,
         fontSize: 15,
         lineHeight: 23,
         color: "#7B7F8A",
     },
+
     permissionList: {
         marginTop: 42,
         gap: 14,
     },
+
     permissionCard: {
         minHeight: 88,
         paddingHorizontal: 16,
@@ -402,34 +492,41 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "#FFFFFF",
     },
+
     disabled: {
         opacity: 0.5,
     },
+
     permissionIcon: {
         width: 40,
         height: 40,
         alignItems: "center",
         justifyContent: "center",
     },
+
     permissionTextArea: {
         flex: 1,
         marginLeft: 12,
     },
+
     permissionTitle: {
         fontSize: 16,
         lineHeight: 22,
         fontWeight: "600",
         color: "#111111",
     },
+
     permissionDescription: {
         marginTop: 5,
         fontSize: 13,
         lineHeight: 19,
         color: "#7B7F8A",
     },
+
     bottomArea: {
         paddingBottom: 20,
     },
+
     helperText: {
         marginBottom: 20,
         textAlign: "center",
@@ -437,6 +534,7 @@ const styles = StyleSheet.create({
         lineHeight: 19,
         color: "#7B7F8A",
     },
+
     startButton: {
         height: 56,
         borderRadius: 4,
@@ -444,6 +542,7 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         backgroundColor: "#111111",
     },
+
     startButtonText: {
         fontSize: 17,
         lineHeight: 24,
