@@ -6,7 +6,7 @@ import {
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,6 +15,7 @@ import { Colors } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
 import { ScheduleCard } from "@/components/home/ScheduleCard";
 import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
+import { AppErrorScreen } from "@/components/ui/AppErrorScreen";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 
 const WEEKDAYS = [
@@ -58,47 +59,139 @@ function getTodayText() {
 
 export default function HomeScreen() {
     const todayText = getTodayText();
-    const { session, loading } = useAuth();
 
+    const {
+        session,
+        loading,
+        error: authError,
+        retry: retryAuth,
+    } = useAuth();
+
+    const [checkingPermissionOnboarding, setCheckingPermissionOnboarding] =
+        useState(true);
+
+    const [selectedFilter, setSelectedFilter] =
+        useState<"전체" | "오전" | "오후">("전체");
+
+    /*
+     * 최초 앱 진입 시 권한 온보딩 완료 여부 확인
+     *
+     * permission_onboarding_completed 값이 없으면
+     * 아직 권한 안내를 완료하지 않은 사용자이므로
+     * permissions 화면으로 이동합니다.
+     */
     useEffect(() => {
+        let mounted = true;
+
         const checkPermissionOnboarding = async () => {
             try {
                 const completed = await AsyncStorage.getItem(
                     STORAGE_KEYS.permissionOnboardingCompleted
                 );
 
+                if (!mounted) {
+                    return;
+                }
+
                 if (completed !== "true") {
                     router.replace("/permissions");
                     return;
                 }
+
+                setCheckingPermissionOnboarding(false);
             } catch (error) {
                 console.error(
                     "권한 온보딩 상태 확인 오류:",
                     error
                 );
-            } finally {
-                setCheckingPermissionOnboarding(false);
+
+                /*
+                 * AsyncStorage 확인에 실패했다고 해서
+                 * 앱 사용 자체를 막지는 않습니다.
+                 */
+                if (mounted) {
+                    setCheckingPermissionOnboarding(false);
+                }
             }
         };
 
-        checkPermissionOnboarding();
+        void checkPermissionOnboarding();
+
+        return () => {
+            mounted = false;
+        };
     }, []);
 
-    const [selectedFilter, setSelectedFilter] = useState<"전체" | "오전" | "오후">("전체");
-
     const filteredSchedules =
-        selectedFilter === "전체" ? schedules : schedules.filter(
-                (schedule) => schedule.period === selectedFilter
+        selectedFilter === "전체"
+            ? schedules
+            : schedules.filter(
+                (schedule) =>
+                    schedule.period === selectedFilter
             );
 
     const scheduleCount = schedules.length;
 
+    /*
+     * =====================================================
+     * [개발용 테스트 코드]
+     *
+     * AppErrorScreen UI를 강제로 확인하기 위한 코드입니다.
+     *
+     * true
+     * → 항상 오류 화면 표시
+     *
+     * false
+     * → 정상 앱 흐름
+     *
+     * 평소 개발 시 false로 두고,
+     * 오류 화면 UI 확인이 필요할 때만 true로 변경합니다.
+     *
+     * ⚠️ 실제 출시 전에는
+     * 아래 FORCE_ERROR_SCREEN_FOR_TEST 선언부터
+     * if 블록 끝까지 전체 삭제합니다.
+     * =====================================================
+     */
+    const FORCE_ERROR_SCREEN_FOR_TEST = false;
 
-    const [checkingPermissionOnboarding, setCheckingPermissionOnboarding] =
-        useState(true);
+    if (FORCE_ERROR_SCREEN_FOR_TEST) {
+        return (
+            <AppErrorScreen
+                onRetry={() => {
+                    console.log(
+                        "[개발용] 오류 화면 다시 시도 버튼 클릭"
+                    );
+                }}
+            />
+        );
+    }
 
+    /*
+     * =====================================================
+     *
+     * =====================================================
+     */
+
+    /*
+     * Supabase Session 복구 또는
+     * 최초 권한 온보딩 상태 확인 중에는
+     * Home 대신 Loading 화면을 표시합니다.
+     */
     if (loading || checkingPermissionOnboarding) {
         return <AppLoadingScreen />;
+    }
+
+    /*
+     * Supabase Auth 초기화 중 오류가 발생한 경우
+     * 오류 화면을 표시하고 다시 시도할 수 있게 합니다.
+     */
+    if (authError) {
+        return (
+            <AppErrorScreen
+                message={authError}
+                onRetry={retryAuth}
+            />
+        );
     }
 
     const handleLogin = () => {
@@ -108,10 +201,6 @@ export default function HomeScreen() {
     const handleAddSchedule = () => {
         router.push("/create");
     };
-
-    const handlePermission = () => {
-        router.push("/permissions");
-    }
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -129,18 +218,11 @@ export default function HomeScreen() {
                         </Pressable>
                     ) : (
                         <Text style={styles.loginText}>
-                            {session.user.user_metadata.nickname ?? "NAVI"}
+                            {session.user.user_metadata.nickname ??
+                                "NAVI"}
                         </Text>
                     )}
-                    {/* 임시용 권한 허용버튼*/}
-                    <Pressable
-                        onPress={handlePermission}
-                        hitSlop={10}
-                    >
-                        <Text style={styles.loginText}>
-                            권한
-                        </Text>
-                    </Pressable>
+
                     <Pressable
                         onPress={handleAddSchedule}
                         hitSlop={10}
@@ -196,19 +278,25 @@ export default function HomeScreen() {
                     <FilterButton
                         title="전체"
                         selected={selectedFilter === "전체"}
-                        onPress={() => setSelectedFilter("전체")}
+                        onPress={() =>
+                            setSelectedFilter("전체")
+                        }
                     />
 
                     <FilterButton
                         title="오전"
                         selected={selectedFilter === "오전"}
-                        onPress={() => setSelectedFilter("오전")}
+                        onPress={() =>
+                            setSelectedFilter("오전")
+                        }
                     />
 
                     <FilterButton
                         title="오후"
                         selected={selectedFilter === "오후"}
-                        onPress={() => setSelectedFilter("오후")}
+                        onPress={() =>
+                            setSelectedFilter("오후")
+                        }
                     />
                 </View>
 
