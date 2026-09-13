@@ -1,10 +1,11 @@
 import {
     Pressable,
-    SafeAreaView,
     StyleSheet,
     Text,
     View,
 } from "react-native";
+
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -12,6 +13,7 @@ import { router } from "expo-router";
 import { Colors } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
 import { ScheduleCard } from "@/components/home/ScheduleCard";
+import { AppLoadingScreen } from "@/components/common/AppLoadingScreen";
 
 const WEEKDAYS = [
     "일요일",
@@ -56,27 +58,17 @@ export default function HomeScreen() {
     const todayText = getTodayText();
     const { session, loading } = useAuth();
 
-    const [selectedFilter, setSelectedFilter] = useState<
-        "전체" | "오전" | "오후"
-    >("전체");
+    const [selectedFilter, setSelectedFilter] = useState<"전체" | "오전" | "오후">("전체");
 
     const filteredSchedules =
-        selectedFilter === "전체"
-            ? schedules
-            : schedules.filter(
+        selectedFilter === "전체" ? schedules : schedules.filter(
                 (schedule) => schedule.period === selectedFilter
             );
 
     const scheduleCount = schedules.length;
 
     if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>
-                    불러오는 중...
-                </Text>
-            </View>
-        );
+        return <AppLoadingScreen />;
     }
 
     const handleLogin = () => {
@@ -325,18 +317,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: "#FFFFFF",
-    },
-
-    loadingContainer: {
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#FFFFFF",
-    },
-
-    loadingText: {
-        fontSize: 16,
-        color: "#777B84",
     },
 
     topBar: {
