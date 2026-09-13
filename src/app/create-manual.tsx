@@ -64,10 +64,6 @@ import { useAuth } from "@/hooks/useAuth";
  * =====================================================
  */
 
-/*
- * 앱 실행 중에도
- * Local Notification을 화면에 표시합니다.
- */
 setNotificationHandler({
     handleNotification: async () => ({
         shouldShowBanner: true,
@@ -84,6 +80,13 @@ setNotificationHandler({
  * =====================================================
  */
 
+type RepeatType =
+    | "none"
+    | "daily"
+    | "weekday"
+    | "weekly";
+
+
 type LocalSchedule = {
     id: string;
 
@@ -92,6 +95,23 @@ type LocalSchedule = {
     memo: string | null;
 
     scheduledAt: string;
+
+    /*
+     * 일정 반복 설정
+     *
+     * none
+     * → 반복 없음
+     *
+     * daily
+     * → 매일 반복
+     *
+     * weekday
+     * → 평일 반복 (월 ~ 금)
+     *
+     * weekly
+     * → 매주 동일 요일 반복
+     */
+    repeatType: RepeatType;
 
     status:
         | "pending"
@@ -118,6 +138,7 @@ type SelectionModalType =
     | "date"
     | "time"
     | "reminder"
+    | "repeat"
     | null;
 
 
@@ -130,6 +151,12 @@ type DateOption = {
 type ReminderOption = {
     label: string;
     value: number | null;
+};
+
+
+type RepeatOption = {
+    label: string;
+    value: RepeatType;
 };
 
 
@@ -178,6 +205,35 @@ const REMINDER_OPTIONS: ReminderOption[] = [
     {
         label: "2시간 전",
         value: 120,
+    },
+];
+
+
+/*
+ * =====================================================
+ * 반복 옵션
+ * =====================================================
+ */
+
+const REPEAT_OPTIONS: RepeatOption[] = [
+    {
+        label: "반복 없음",
+        value: "none",
+    },
+
+    {
+        label: "매일",
+        value: "daily",
+    },
+
+    {
+        label: "평일",
+        value: "weekday",
+    },
+
+    {
+        label: "매주",
+        value: "weekly",
     },
 ];
 
@@ -392,15 +448,6 @@ function convertTo24Hour(
 /*
  * 일정은 현재 시각 기준
  * 최소 30분 이후부터 등록할 수 있습니다.
- *
- * 예:
- *
- * 현재 10:20:00
- * → 10:50 가능
- *
- * 현재 10:20:30
- * → 10:50은 30분 미만
- * → 10:51부터 가능
  */
 function isLessThan30MinutesLater(
     date: Date,
@@ -454,12 +501,6 @@ function createLocalScheduleId() {
  * =====================================================
  */
 
-/*
- * 알림 권한 확인
- *
- * 이미 허용되어 있으면 그대로 진행하고,
- * 허용되어 있지 않으면 시스템 권한을 요청합니다.
- */
 async function ensureNotificationPermission() {
     const currentPermission =
         await getPermissionsAsync();
@@ -486,16 +527,8 @@ async function ensureNotificationPermission() {
  * 일정 Local Notification을
  * 딱 1회만 예약합니다.
  *
- * 예:
- *
- * 일정 시각
- * → 20:40
- *
- * 알림
- * → 10분 전
- *
- * 실제 알림
- * → 20:30
+ * 반복 일정의 다음 알림 예약은
+ * 이후 별도 Task에서 구현합니다.
  */
 async function scheduleLocalNotification(
     scheduleId: string,
@@ -503,10 +536,6 @@ async function scheduleLocalNotification(
     scheduledDate: Date,
     reminderMinutes: number | null
 ) {
-    /*
-     * "알림 없음"이면
-     * 예약하지 않습니다.
-     */
     if (
         reminderMinutes === null
     ) {
@@ -514,9 +543,6 @@ async function scheduleLocalNotification(
     }
 
 
-    /*
-     * 알림 권한 확인
-     */
     const permissionGranted =
         await ensureNotificationPermission();
 
@@ -530,9 +556,6 @@ async function scheduleLocalNotification(
     }
 
 
-    /*
-     * 실제 Local Notification 발생 시각
-     */
     const notificationDate =
         new Date(
             scheduledDate.getTime() -
@@ -542,10 +565,6 @@ async function scheduleLocalNotification(
         );
 
 
-    /*
-     * 알림 발생 시각이
-     * 이미 지나간 경우에는 예약할 수 없습니다.
-     */
     if (
         notificationDate.getTime() <=
         Date.now()
@@ -569,10 +588,6 @@ async function scheduleLocalNotification(
      */
 
 
-    /*
-     * 지정된 시각에
-     * 한 번만 실행되는 Local Notification
-     */
     const notificationId =
         await scheduleNotificationAsync(
             {
@@ -639,11 +654,6 @@ export default function CreateManualScreen() {
         useState("");
 
 
-    /*
-     * 일정 메모
-     *
-     * 선택 입력값입니다.
-     */
     const [
         memo,
         setMemo,
@@ -659,6 +669,21 @@ export default function CreateManualScreen() {
             createDateWithOffset(
                 0
             )
+        );
+
+
+    /*
+     * 반복 기본값
+     *
+     * 신규 일정은 기본적으로
+     * 반복 없음입니다.
+     */
+    const [
+        repeatType,
+        setRepeatType,
+    ] =
+        useState<RepeatType>(
+            "none"
         );
 
 
@@ -680,10 +705,6 @@ export default function CreateManualScreen() {
                     );
 
 
-                /*
-                 * 초가 남아 있으면
-                 * 다음 분으로 올립니다.
-                 */
                 if (
                     minimumTime.getSeconds() >
                     0 ||
@@ -788,11 +809,17 @@ export default function CreateManualScreen() {
         "알림 없음";
 
 
-    /*
-     * 제목은 필수입니다.
-     *
-     * 메모는 선택사항입니다.
-     */
+    const selectedRepeatText =
+        REPEAT_OPTIONS.find(
+            (
+                option
+            ) =>
+                option.value ===
+                repeatType
+        )?.label ??
+        "반복 없음";
+
+
     const canContinue =
         title.trim().length >
         0 &&
@@ -815,10 +842,6 @@ export default function CreateManualScreen() {
             }
 
 
-            /*
-             * 사용자가 화면에 오래 머물렀을 수 있으므로
-             * 저장 직전에도 최소 30분 조건을 다시 검사합니다.
-             */
             if (
                 isLessThan30MinutesLater(
                     selectedDate,
@@ -841,9 +864,6 @@ export default function CreateManualScreen() {
 
 
             try {
-                /*
-                 * 실제 일정 날짜 + 시간 생성
-                 */
                 const scheduledDate =
                     new Date(
                         selectedDate
@@ -858,19 +878,12 @@ export default function CreateManualScreen() {
                 );
 
 
-                /*
-                 * 현재 사용자에 맞는
-                 * AsyncStorage Key
-                 */
                 const storageKey =
                     getScheduleStorageKey(
                         session?.user.id
                     );
 
 
-                /*
-                 * 기존 일정 조회
-                 */
                 const storedSchedules =
                     await AsyncStorage.getItem(
                         storageKey
@@ -896,31 +909,39 @@ export default function CreateManualScreen() {
                             parsed
                         )
                     ) {
+                        /*
+                         * 기존에 저장된 일정에는
+                         * repeatType이 없을 수 있습니다.
+                         *
+                         * 기존 데이터는 삭제하지 않고
+                         * repeatType이 없는 경우
+                         * 반복 없음으로 보정합니다.
+                         */
                         schedules =
-                            parsed;
+                            parsed.map(
+                                (
+                                    schedule
+                                ) => ({
+                                    ...schedule,
+
+                                    repeatType:
+                                        schedule.repeatType ??
+                                        "none",
+                                })
+                            );
                     }
                 }
 
 
-                /*
-                 * 신규 일정 ID
-                 */
                 const scheduleId =
                     createLocalScheduleId();
 
 
-                /*
-                 * Local Notification 예약 ID
-                 */
                 let localNotificationId:
                     string | null =
                     null;
 
 
-                /*
-                 * "알림 없음"이 아닌 경우에만
-                 * Local Notification 예약
-                 */
                 if (
                     reminderMinutes !==
                     null
@@ -945,13 +966,6 @@ export default function CreateManualScreen() {
                         );
 
 
-                        /*
-                         * 알림 예약 실패와
-                         * 일정 저장 실패는 분리합니다.
-                         *
-                         * 알림 예약에 실패하더라도
-                         * 일정 자체는 저장합니다.
-                         */
                         Alert.alert(
                             "알림은 예약하지 못했어요",
                             "일정은 정상적으로 저장합니다."
@@ -960,9 +974,6 @@ export default function CreateManualScreen() {
                 }
 
 
-                /*
-                 * 신규 일정
-                 */
                 const newSchedule:
                     LocalSchedule = {
                     id:
@@ -978,6 +989,11 @@ export default function CreateManualScreen() {
                     scheduledAt:
                         scheduledDate.toISOString(),
 
+                    /*
+                     * 반복 설정 저장
+                     */
+                    repeatType,
+
                     status:
                         "pending",
 
@@ -990,9 +1006,6 @@ export default function CreateManualScreen() {
                 };
 
 
-                /*
-                 * AsyncStorage 저장
-                 */
                 await AsyncStorage.setItem(
                     storageKey,
 
@@ -1011,9 +1024,6 @@ export default function CreateManualScreen() {
                 );
 
 
-                /*
-                 * 저장 완료 후 Home 이동
-                 */
                 router.replace(
                     "/"
                 );
@@ -1072,10 +1082,6 @@ export default function CreateManualScreen() {
             hour: number,
             minute: number
         ) => {
-            /*
-             * 최소 30분 이후가 아니면
-             * 시간 선택 자체를 막습니다.
-             */
             if (
                 isLessThan30MinutesLater(
                     selectedDate,
@@ -1120,6 +1126,27 @@ export default function CreateManualScreen() {
                 number | null
         ) => {
             setReminderMinutes(
+                value
+            );
+
+
+            setSelectionModal(
+                null
+            );
+        };
+
+
+    /*
+     * =====================================================
+     * 반복 선택
+     * =====================================================
+     */
+
+    const handleSelectRepeat =
+        (
+            value: RepeatType
+        ) => {
+            setRepeatType(
                 value
             );
 
@@ -1208,247 +1235,320 @@ export default function CreateManualScreen() {
                     </View>
 
 
-                    {/* 입력 폼 */}
-                    <View
+                    {/*
+                     * 입력 항목이 늘어나도
+                     * 작은 화면에서 하단이 잘리지 않도록
+                     * Form 영역을 ScrollView로 처리합니다.
+                     */}
+                    <ScrollView
                         style={
-                            styles.form
+                            styles.formScroll
                         }
+                        contentContainerStyle={
+                            styles.formScrollContent
+                        }
+                        showsVerticalScrollIndicator={
+                            false
+                        }
+                        keyboardShouldPersistTaps="handled"
                     >
-                        {/* 제목 */}
                         <View
                             style={
-                                styles.inputRow
+                                styles.form
                             }
                         >
-                            <Text
+                            {/* 제목 */}
+                            <View
                                 style={
-                                    styles.label
+                                    styles.inputRow
                                 }
                             >
-                                제목
-                            </Text>
+                                <Text
+                                    style={
+                                        styles.label
+                                    }
+                                >
+                                    제목
+                                </Text>
 
 
-                            <TextInput
+                                <TextInput
+                                    style={
+                                        styles.titleInput
+                                    }
+                                    value={
+                                        title
+                                    }
+                                    onChangeText={
+                                        setTitle
+                                    }
+                                    placeholder="일정 제목을 입력해 주세요"
+                                    placeholderTextColor="#A1A4AA"
+                                    maxLength={
+                                        50
+                                    }
+                                />
+                            </View>
+
+
+                            {/* 날짜 */}
+                            <Pressable
                                 style={
-                                    styles.titleInput
+                                    styles.optionRow
                                 }
-                                value={
-                                    title
+                                onPress={() =>
+                                    setSelectionModal(
+                                        "date"
+                                    )
                                 }
-                                onChangeText={
-                                    setTitle
+                            >
+                                <Text
+                                    style={
+                                        styles.label
+                                    }
+                                >
+                                    날짜
+                                </Text>
+
+
+                                <View
+                                    style={
+                                        styles.optionValueArea
+                                    }
+                                >
+                                    <Text
+                                        style={
+                                            styles.optionValue
+                                        }
+                                    >
+                                        {formatDate(
+                                            selectedDate
+                                        )}
+                                    </Text>
+
+
+                                    <Ionicons
+                                        name="chevron-forward"
+                                        size={
+                                            20
+                                        }
+                                        color="#8A8E96"
+                                    />
+                                </View>
+                            </Pressable>
+
+
+                            {/* 시간 */}
+                            <Pressable
+                                style={
+                                    styles.optionRow
                                 }
-                                placeholder="일정 제목을 입력해 주세요"
-                                placeholderTextColor="#A1A4AA"
-                                maxLength={
-                                    50
+                                onPress={() =>
+                                    setSelectionModal(
+                                        "time"
+                                    )
                                 }
-                            />
+                            >
+                                <Text
+                                    style={
+                                        styles.label
+                                    }
+                                >
+                                    시간
+                                </Text>
+
+
+                                <View
+                                    style={
+                                        styles.optionValueArea
+                                    }
+                                >
+                                    <Text
+                                        style={
+                                            styles.optionValue
+                                        }
+                                    >
+                                        {
+                                            selectedTimeText
+                                        }
+                                    </Text>
+
+
+                                    <Ionicons
+                                        name="chevron-forward"
+                                        size={
+                                            20
+                                        }
+                                        color="#8A8E96"
+                                    />
+                                </View>
+                            </Pressable>
+
+
+                            {/* 알림 */}
+                            <Pressable
+                                style={
+                                    styles.optionRow
+                                }
+                                onPress={() =>
+                                    setSelectionModal(
+                                        "reminder"
+                                    )
+                                }
+                            >
+                                <Text
+                                    style={
+                                        styles.label
+                                    }
+                                >
+                                    알림
+                                </Text>
+
+
+                                <View
+                                    style={
+                                        styles.optionValueArea
+                                    }
+                                >
+                                    <Text
+                                        style={
+                                            styles.optionValue
+                                        }
+                                    >
+                                        {
+                                            selectedReminderText
+                                        }
+                                    </Text>
+
+
+                                    <Ionicons
+                                        name="chevron-forward"
+                                        size={
+                                            20
+                                        }
+                                        color="#8A8E96"
+                                    />
+                                </View>
+                            </Pressable>
+
+
+                            {/* 반복 */}
+                            <Pressable
+                                style={
+                                    styles.optionRow
+                                }
+                                onPress={() =>
+                                    setSelectionModal(
+                                        "repeat"
+                                    )
+                                }
+                            >
+                                <Text
+                                    style={
+                                        styles.label
+                                    }
+                                >
+                                    반복
+                                </Text>
+
+
+                                <View
+                                    style={
+                                        styles.optionValueArea
+                                    }
+                                >
+                                    <Text
+                                        style={
+                                            styles.optionValue
+                                        }
+                                    >
+                                        {
+                                            selectedRepeatText
+                                        }
+                                    </Text>
+
+
+                                    <Ionicons
+                                        name="chevron-forward"
+                                        size={
+                                            20
+                                        }
+                                        color="#8A8E96"
+                                    />
+                                </View>
+                            </Pressable>
+
+
+                            {/* 메모 */}
+                            <View
+                                style={[
+                                    styles.memoRow,
+                                    styles.lastOptionRow,
+                                ]}
+                            >
+                                <Text
+                                    style={
+                                        styles.memoLabel
+                                    }
+                                >
+                                    메모
+                                </Text>
+
+
+                                <TextInput
+                                    style={
+                                        styles.memoInput
+                                    }
+                                    value={
+                                        memo
+                                    }
+                                    onChangeText={
+                                        setMemo
+                                    }
+                                    placeholder="메모를 입력해 주세요"
+                                    placeholderTextColor="#A1A4AA"
+                                    multiline
+                                    textAlignVertical="top"
+                                    maxLength={
+                                        500
+                                    }
+                                />
+
+
+                                <Text
+                                    style={
+                                        styles.memoCount
+                                    }
+                                >
+                                    {memo.length}/500
+                                </Text>
+                            </View>
                         </View>
 
 
-                        {/* 메모 */}
                         <View
                             style={
-                                styles.memoRow
+                                styles.guide
                             }
                         >
-                            <Text
-                                style={
-                                    styles.memoLabel
+                            <Ionicons
+                                name="information-circle-outline"
+                                size={
+                                    16
                                 }
-                            >
-                                메모
-                            </Text>
-
-
-                            <TextInput
-                                style={
-                                    styles.memoInput
-                                }
-                                value={
-                                    memo
-                                }
-                                onChangeText={
-                                    setMemo
-                                }
-                                placeholder="메모를 입력해 주세요"
-                                placeholderTextColor="#A1A4AA"
-                                multiline
-                                textAlignVertical="top"
-                                maxLength={
-                                    500
-                                }
+                                color="#92959C"
                             />
+
+
+                            <Text
+                                style={
+                                    styles.guideText
+                                }
+                            >
+                                일정은 현재 이 기기에 저장됩니다.
+                            </Text>
                         </View>
-
-
-                        {/* 날짜 */}
-                        <Pressable
-                            style={
-                                styles.optionRow
-                            }
-                            onPress={() =>
-                                setSelectionModal(
-                                    "date"
-                                )
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.label
-                                }
-                            >
-                                날짜
-                            </Text>
-
-
-                            <View
-                                style={
-                                    styles.optionValueArea
-                                }
-                            >
-                                <Text
-                                    style={
-                                        styles.optionValue
-                                    }
-                                >
-                                    {formatDate(
-                                        selectedDate
-                                    )}
-                                </Text>
-
-
-                                <Ionicons
-                                    name="chevron-forward"
-                                    size={
-                                        20
-                                    }
-                                    color="#8A8E96"
-                                />
-                            </View>
-                        </Pressable>
-
-
-                        {/* 시간 */}
-                        <Pressable
-                            style={
-                                styles.optionRow
-                            }
-                            onPress={() =>
-                                setSelectionModal(
-                                    "time"
-                                )
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.label
-                                }
-                            >
-                                시간
-                            </Text>
-
-
-                            <View
-                                style={
-                                    styles.optionValueArea
-                                }
-                            >
-                                <Text
-                                    style={
-                                        styles.optionValue
-                                    }
-                                >
-                                    {
-                                        selectedTimeText
-                                    }
-                                </Text>
-
-
-                                <Ionicons
-                                    name="chevron-forward"
-                                    size={
-                                        20
-                                    }
-                                    color="#8A8E96"
-                                />
-                            </View>
-                        </Pressable>
-
-
-                        {/* 알림 */}
-                        <Pressable
-                            style={[
-                                styles.optionRow,
-                                styles.lastOptionRow,
-                            ]}
-                            onPress={() =>
-                                setSelectionModal(
-                                    "reminder"
-                                )
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.label
-                                }
-                            >
-                                알림
-                            </Text>
-
-
-                            <View
-                                style={
-                                    styles.optionValueArea
-                                }
-                            >
-                                <Text
-                                    style={
-                                        styles.optionValue
-                                    }
-                                >
-                                    {
-                                        selectedReminderText
-                                    }
-                                </Text>
-
-
-                                <Ionicons
-                                    name="chevron-forward"
-                                    size={
-                                        20
-                                    }
-                                    color="#8A8E96"
-                                />
-                            </View>
-                        </Pressable>
-                    </View>
-
-
-                    <View
-                        style={
-                            styles.guide
-                        }
-                    >
-                        <Ionicons
-                            name="information-circle-outline"
-                            size={
-                                16
-                            }
-                            color="#92959C"
-                        />
-
-
-                        <Text
-                            style={
-                                styles.guideText
-                            }
-                        >
-                            일정은 현재 이 기기에 저장됩니다.
-                        </Text>
-                    </View>
+                    </ScrollView>
 
 
                     {/* 하단 */}
@@ -1591,6 +1691,64 @@ export default function CreateManualScreen() {
                         />
                     )
                 )}
+            </SimpleSelectionModal>
+
+
+            {/* 반복 설정 */}
+            <SimpleSelectionModal
+                visible={
+                    selectionModal ===
+                    "repeat"
+                }
+                title="반복 설정"
+                onClose={() =>
+                    setSelectionModal(
+                        null
+                    )
+                }
+            >
+                {REPEAT_OPTIONS.map(
+                    (
+                        option
+                    ) => (
+                        <SelectionButton
+                            key={
+                                option.value
+                            }
+                            label={
+                                option.label
+                            }
+                            selected={
+                                repeatType ===
+                                option.value
+                            }
+                            onPress={() =>
+                                handleSelectRepeat(
+                                    option.value
+                                )
+                            }
+                            selectionType="radio"
+                        />
+                    )
+                )}
+
+
+                {repeatType ===
+                    "weekday" && (
+                        <View
+                            style={
+                                styles.repeatNotice
+                            }
+                        >
+                            <Text
+                                style={
+                                    styles.repeatNoticeText
+                                }
+                            >
+                                공휴일 포함 월~금 반복해요.
+                            </Text>
+                        </View>
+                    )}
             </SimpleSelectionModal>
         </>
     );
@@ -1763,7 +1921,6 @@ function TimeWheelModal({
                         />
 
 
-                        {/* 오전 / 오후 */}
                         <WheelColumn
                             items={
                                 PERIOD_OPTIONS
@@ -1781,7 +1938,6 @@ function TimeWheelModal({
                         />
 
 
-                        {/* 시 */}
                         <WheelColumn
                             items={
                                 HOUR_OPTIONS
@@ -1810,7 +1966,6 @@ function TimeWheelModal({
                         </Text>
 
 
-                        {/* 분 */}
                         <WheelColumn
                             items={
                                 MINUTE_OPTIONS
@@ -2083,6 +2238,13 @@ function SimpleSelectionModal({
                 >
                     <View
                         style={
+                            styles.modalHandle
+                        }
+                    />
+
+
+                    <View
+                        style={
                             styles.selectionHeader
                         }
                     >
@@ -2142,6 +2304,7 @@ function SelectionButton({
                              label,
                              selected,
                              onPress,
+                             selectionType = "check",
                          }: {
     label: string;
 
@@ -2149,6 +2312,10 @@ function SelectionButton({
 
     onPress:
         () => void;
+
+    selectionType?:
+        | "check"
+        | "radio";
 }) {
     return (
         <Pressable
@@ -2159,29 +2326,58 @@ function SelectionButton({
                 onPress
             }
         >
-            <Text
-                style={[
-                    styles.selectionButtonText,
-
-                    selected &&
-                    styles.selectionButtonTextSelected,
-                ]}
-            >
-                {
-                    label
+            <View
+                style={
+                    styles.selectionButtonLeft
                 }
-            </Text>
+            >
+                {selectionType ===
+                    "radio" && (
+                        <View
+                            style={[
+                                styles.radioOuter,
+
+                                selected &&
+                                styles.radioOuterSelected,
+                            ]}
+                        >
+                            {selected && (
+                                <View
+                                    style={
+                                        styles.radioInner
+                                    }
+                                />
+                            )}
+                        </View>
+                    )}
 
 
-            {selected && (
-                <Ionicons
-                    name="checkmark"
-                    size={
-                        21
+                <Text
+                    style={[
+                        styles.selectionButtonText,
+
+                        selected &&
+                        styles.selectionButtonTextSelected,
+                    ]}
+                >
+                    {
+                        label
                     }
-                    color="#111111"
-                />
-            )}
+                </Text>
+            </View>
+
+
+            {selectionType ===
+                "check" &&
+                selected && (
+                    <Ionicons
+                        name="checkmark"
+                        size={
+                            21
+                        }
+                        color="#111111"
+                    />
+                )}
         </Pressable>
     );
 }
@@ -2251,7 +2447,7 @@ const styles =
 
         titleArea: {
             marginTop:
-                28,
+                20,
         },
 
 
@@ -2285,10 +2481,22 @@ const styles =
         },
 
 
-        form: {
-            marginTop:
-                36,
+        formScroll: {
+            flex:
+                1,
 
+            marginTop:
+                20,
+        },
+
+
+        formScrollContent: {
+            paddingBottom:
+                24,
+        },
+
+
+        form: {
             borderWidth:
                 1,
 
@@ -2324,78 +2532,6 @@ const styles =
 
             borderBottomColor:
                 "#ECEDEF",
-        },
-
-
-        /*
-         * 메모 입력 영역
-         */
-        memoRow: {
-            minHeight:
-                104,
-
-            paddingHorizontal:
-                16,
-
-            paddingVertical:
-                14,
-
-            flexDirection:
-                "row",
-
-            alignItems:
-                "flex-start",
-
-            borderBottomWidth:
-                1,
-
-            borderBottomColor:
-                "#ECEDEF",
-        },
-
-
-        memoLabel: {
-            width:
-                72,
-
-            paddingTop:
-                2,
-
-            fontSize:
-                15,
-
-            fontWeight:
-                "500",
-
-            color:
-                "#55585F",
-        },
-
-
-        memoInput: {
-            flex:
-                1,
-
-            minHeight:
-                74,
-
-            paddingTop:
-                0,
-
-            paddingBottom:
-                0,
-
-            paddingHorizontal:
-                0,
-
-            fontSize:
-                15,
-
-            lineHeight:
-                22,
-
-            color:
-                "#111111",
         },
 
 
@@ -2480,6 +2616,96 @@ const styles =
         },
 
 
+        /*
+         * 메모 입력 영역
+         */
+        memoRow: {
+            minHeight:
+                120,
+
+            paddingHorizontal:
+                16,
+
+            paddingTop:
+                16,
+
+            paddingBottom:
+                12,
+
+            flexDirection:
+                "row",
+
+            alignItems:
+                "flex-start",
+
+            position:
+                "relative",
+        },
+
+
+        memoLabel: {
+            width:
+                72,
+
+            paddingTop:
+                2,
+
+            fontSize:
+                15,
+
+            fontWeight:
+                "500",
+
+            color:
+                "#55585F",
+        },
+
+
+        memoInput: {
+            flex:
+                1,
+
+            minHeight:
+                82,
+
+            paddingTop:
+                0,
+
+            paddingBottom:
+                20,
+
+            paddingHorizontal:
+                0,
+
+            fontSize:
+                15,
+
+            lineHeight:
+                22,
+
+            color:
+                "#111111",
+        },
+
+
+        memoCount: {
+            position:
+                "absolute",
+
+            right:
+                14,
+
+            bottom:
+                10,
+
+            fontSize:
+                11,
+
+            color:
+                "#A1A4AA",
+        },
+
+
         guide: {
             marginTop:
                 16,
@@ -2523,11 +2749,14 @@ const styles =
 
 
         bottomArea: {
-            marginTop:
-                "auto",
+            paddingTop:
+                12,
 
             paddingBottom:
                 16,
+
+            backgroundColor:
+                "#FFFFFF",
         },
 
 
@@ -2602,16 +2831,37 @@ const styles =
                 20,
 
             paddingTop:
-                20,
+                10,
 
             paddingBottom:
-                12,
+                18,
 
             borderRadius:
                 12,
 
             backgroundColor:
                 "#FFFFFF",
+        },
+
+
+        modalHandle: {
+            width:
+                32,
+
+            height:
+                4,
+
+            marginBottom:
+                14,
+
+            alignSelf:
+                "center",
+
+            borderRadius:
+                2,
+
+            backgroundColor:
+                "#D5D6D9",
         },
 
 
@@ -2650,7 +2900,7 @@ const styles =
 
         selectionButton: {
             minHeight:
-                52,
+                54,
 
             flexDirection:
                 "row",
@@ -2669,6 +2919,18 @@ const styles =
         },
 
 
+        selectionButtonLeft: {
+            flexDirection:
+                "row",
+
+            alignItems:
+                "center",
+
+            gap:
+                10,
+        },
+
+
         selectionButtonText: {
             fontSize:
                 15,
@@ -2684,6 +2946,94 @@ const styles =
 
             fontWeight:
                 "600",
+        },
+
+
+        /*
+         * 반복 설정 Radio
+         */
+
+        radioOuter: {
+            width:
+                20,
+
+            height:
+                20,
+
+            borderWidth:
+                1.5,
+
+            borderColor:
+                "#A1A4AA",
+
+            borderRadius:
+                10,
+
+            alignItems:
+                "center",
+
+            justifyContent:
+                "center",
+        },
+
+
+        radioOuterSelected: {
+            borderColor:
+                "#111111",
+        },
+
+
+        radioInner: {
+            width:
+                10,
+
+            height:
+                10,
+
+            borderRadius:
+                5,
+
+            backgroundColor:
+                "#111111",
+        },
+
+
+        repeatNotice: {
+            marginTop:
+                16,
+
+            minHeight:
+                72,
+
+            paddingHorizontal:
+                16,
+
+            paddingVertical:
+                16,
+
+            borderRadius:
+                10,
+
+            alignItems:
+                "center",
+
+            justifyContent:
+                "center",
+
+            backgroundColor:
+                "#FFF3F3",
+        },
+
+
+        repeatNoticeText: {
+            fontSize:
+                13,
+
+            lineHeight:
+                20,
+
+            color:
+                "#666666",
         },
 
 
