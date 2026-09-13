@@ -13,7 +13,7 @@ import { router } from "expo-router";
 import { Colors } from "@/constants/colors";
 import { useAuth } from "@/hooks/useAuth";
 import { ScheduleCard } from "@/components/home/ScheduleCard";
-import { AppLoadingScreen } from "@/components/common/AppLoadingScreen";
+import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
 
 const WEEKDAYS = [
     "일요일",
