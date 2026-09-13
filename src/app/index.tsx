@@ -79,6 +79,10 @@ export default function HomeScreen() {
         router.push("/create");
     };
 
+    const handlePermission = () => {
+        router.push("/permissions");
+    }
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.container}>
@@ -98,7 +102,15 @@ export default function HomeScreen() {
                             {session.user.user_metadata.nickname ?? "NAVI"}
                         </Text>
                     )}
-
+                    {/* 임시용 권한 허용버튼*/}
+                    <Pressable
+                        onPress={handlePermission}
+                        hitSlop={10}
+                    >
+                        <Text style={styles.loginText}>
+                            권한
+                        </Text>
+                    </Pressable>
                     <Pressable
                         onPress={handleAddSchedule}
                         hitSlop={10}
