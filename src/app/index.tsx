@@ -15,8 +15,12 @@ import {
     useState,
 } from "react";
 
+import {
+    router,
+    useFocusEffect,
+} from "expo-router";
+
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
@@ -68,16 +72,6 @@ type LocalSchedule = {
 
     status: ScheduleStatus;
 
-    /*
-     * 기존 데이터 / 기존 코드 호환용입니다.
-     *
-     * 현재는 status와 함께 저장하지만
-     * 상태 판단 기준은 status입니다.
-     *
-     * pending   → false
-     * completed → true
-     * failed    → false
-     */
     completed: boolean;
 
     reminderMinutes?:
@@ -707,10 +701,6 @@ export default function HomeScreen() {
                         return;
                     }
 
-                    /*
-                     * 기존 데이터에는 repeatType 등이
-                     * 없을 수 있으므로 기본값을 보정합니다.
-                     */
                     const normalizedSchedules:
                         LocalSchedule[] =
                         parsedSchedules.map(
@@ -724,6 +714,33 @@ export default function HomeScreen() {
 
                     setSchedules(
                         normalizedSchedules
+                    );
+
+                    /*
+                     * 상세 Popup이 열려 있었던 경우
+                     * 같은 일정의 최신 데이터로 갱신합니다.
+                     */
+                    setSelectedSchedule(
+                        (
+                            current
+                        ) => {
+                            if (
+                                !current
+                            ) {
+                                return null;
+                            }
+
+                            return (
+                                normalizedSchedules.find(
+                                    (
+                                        schedule
+                                    ) =>
+                                        schedule.id ===
+                                        current.id
+                                ) ??
+                                null
+                            );
+                        }
                     );
                 } catch (
                     error
@@ -749,13 +766,22 @@ export default function HomeScreen() {
             ]
         );
 
-    useEffect(
-        () => {
-            void loadSchedules();
-        },
-        [
-            loadSchedules,
-        ]
+    /*
+     * Home 화면이 다시 focus될 때마다
+     * AsyncStorage의 최신 일정을 다시 불러옵니다.
+     *
+     * 일정 수정 화면에서 저장 후 Home으로 돌아왔을 때
+     * 수정 내용이 즉시 반영되도록 하기 위한 처리입니다.
+     */
+    useFocusEffect(
+        useCallback(
+            () => {
+                void loadSchedules();
+            },
+            [
+                loadSchedules,
+            ]
+        )
     );
 
     /*
@@ -832,9 +858,14 @@ export default function HomeScreen() {
         };
 
     /*
-     * 일정 수정 화면은
-     * 별도 Issue에서 구현합니다.
+     * =====================================================
+     * 일정 수정
+     *
+     * 상세 Popup의 연필 아이콘
+     * → schedule-edit 화면으로 이동합니다.
+     * =====================================================
      */
+
     const handleEditSchedule =
         (
             schedule:
@@ -849,12 +880,15 @@ export default function HomeScreen() {
                 false
             );
 
-            /*
-             * TODO
-             *
-             * 일정 수정 화면 구현 후
-             * 해당 schedule.id를 넘겨 이동합니다.
-             */
+            router.push({
+                pathname:
+                    "/schedule-edit",
+
+                params: {
+                    scheduleId:
+                    schedule.id,
+                },
+            });
         };
 
     /*
@@ -882,10 +916,6 @@ export default function HomeScreen() {
                 nextStatus =
                     "completed";
             } else {
-                /*
-                 * completed 또는 failed
-                 * → pending으로 복귀
-                 */
                 nextStatus =
                     "pending";
             }
@@ -1051,10 +1081,6 @@ export default function HomeScreen() {
             LocalSchedule
         ) => {
             try {
-                /*
-                 * 예약된 Local Notification이 있다면
-                 * 삭제 전에 함께 취소합니다.
-                 */
                 if (
                     schedule.localNotificationId
                 ) {
@@ -1070,13 +1096,6 @@ export default function HomeScreen() {
                     } catch (
                         notificationError
                         ) {
-                        /*
-                         * 알림 취소가 실패해도
-                         * 일정 삭제 자체는 진행합니다.
-                         *
-                         * 이미 실행되었거나
-                         * 이미 취소된 알림일 수 있습니다.
-                         */
                         console.error(
                             "예약 알림 취소 오류:",
                             notificationError
@@ -1233,11 +1252,6 @@ export default function HomeScreen() {
                         styles.container
                     }
                 >
-                    {/*
-                     * =====================================================
-                     * 상단
-                     * =====================================================
-                     */}
                     <View
                         style={
                             styles.topBar
@@ -1293,11 +1307,6 @@ export default function HomeScreen() {
                         </Pressable>
                     </View>
 
-                    {/*
-                     * =====================================================
-                     * Home Scroll
-                     * =====================================================
-                     */}
                     <ScrollView
                         style={
                             styles.homeScroll
@@ -1454,7 +1463,7 @@ export default function HomeScreen() {
                                     아직 등록한 일정이 없어요.
                                 </Text>
 
-                                <Pressable
+                                {session && ( <Pressable
                                     style={
                                         styles.addButton
                                     }
@@ -1462,14 +1471,14 @@ export default function HomeScreen() {
                                         handleManualInput
                                     }
                                 >
-                                    <Text
+                                       <Text
                                         style={
                                             styles.addButtonText
                                         }
                                     >
                                         일정 직접 추가
                                     </Text>
-                                </Pressable>
+                                </Pressable>)}
                             </View>
                         ) : filteredSchedules.length ===
                         0 ? (
@@ -1539,11 +1548,6 @@ export default function HomeScreen() {
                         )}
                     </ScrollView>
 
-                    {/*
-                     * =====================================================
-                     * 하단 Navigation
-                     * =====================================================
-                     */}
                     <View
                         style={
                             styles.bottomNavigation
@@ -1570,11 +1574,6 @@ export default function HomeScreen() {
                 </View>
             </SafeAreaView>
 
-            {/*
-             * =====================================================
-             * 비회원 로그인 안내
-             * =====================================================
-             */}
             <LoginRequiredModal
                 visible={
                     loginRequiredVisible
@@ -1590,11 +1589,6 @@ export default function HomeScreen() {
                 }
             />
 
-            {/*
-             * =====================================================
-             * 일정 정보 Popup
-             * =====================================================
-             */}
             <ScheduleInfoModal
                 visible={
                     scheduleInfoVisible

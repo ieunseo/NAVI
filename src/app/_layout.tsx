@@ -42,7 +42,7 @@ export default function RootLayout() {
                 <Stack.Screen name="permissions" />
                 <Stack.Screen name="create" />
                 <Stack.Screen name="explore" />
-
+                <Stack.Screen name="schedule-edit"/>
                 <Stack.Screen
                     name="auth"
                     options={{
