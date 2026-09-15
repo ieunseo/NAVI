@@ -62,6 +62,17 @@ type ScheduleStatus =
 type LocalSchedule = {
     id: string;
 
+    /*
+     * 같은 반복 일정 그룹을 식별하는 ID입니다.
+     *
+     * 반복 없음:
+     * null
+     *
+     * 반복 일정:
+     * 같은 반복 묶음끼리 동일한 seriesId 사용
+     */
+    seriesId?: string | null;
+
     title: string;
 
     memo?: string | null;
@@ -130,6 +141,9 @@ const TEST_SCHEDULES:
     {
         id: "test-1",
 
+        seriesId:
+            null,
+
         title: "회의 준비",
 
         memo:
@@ -160,6 +174,9 @@ const TEST_SCHEDULES:
     {
         id: "test-2",
 
+        seriesId:
+            "test-series-1",
+
         title: "책 읽기",
 
         memo:
@@ -189,6 +206,9 @@ const TEST_SCHEDULES:
 
     {
         id: "test-3",
+
+        seriesId:
+            null,
 
         title:
             "택배 보내기",
@@ -273,6 +293,10 @@ function normalizeSchedule(
 
     return {
         ...schedule,
+
+        seriesId:
+            schedule.seriesId ??
+            null,
 
         repeatType:
             schedule.repeatType ??
@@ -716,10 +740,6 @@ export default function HomeScreen() {
                         normalizedSchedules
                     );
 
-                    /*
-                     * 상세 Popup이 열려 있었던 경우
-                     * 같은 일정의 최신 데이터로 갱신합니다.
-                     */
                     setSelectedSchedule(
                         (
                             current
@@ -766,13 +786,6 @@ export default function HomeScreen() {
             ]
         );
 
-    /*
-     * Home 화면이 다시 focus될 때마다
-     * AsyncStorage의 최신 일정을 다시 불러옵니다.
-     *
-     * 일정 수정 화면에서 저장 후 Home으로 돌아왔을 때
-     * 수정 내용이 즉시 반영되도록 하기 위한 처리입니다.
-     */
     useFocusEffect(
         useCallback(
             () => {
@@ -859,10 +872,44 @@ export default function HomeScreen() {
 
     /*
      * =====================================================
+     * 일정 수정 화면 이동
+     * =====================================================
+     */
+
+    const goToScheduleEdit =
+        (
+            schedule:
+            LocalSchedule,
+            editScope:
+                | "single"
+                | "future"
+        ) => {
+            setScheduleInfoVisible(
+                false
+            );
+
+            router.push({
+                pathname:
+                    "/schedule-edit",
+
+                params: {
+                    scheduleId:
+                    schedule.id,
+
+                    editScope,
+                },
+            });
+        };
+
+    /*
+     * =====================================================
      * 일정 수정
      *
-     * 상세 Popup의 연필 아이콘
-     * → schedule-edit 화면으로 이동합니다.
+     * 일반 일정
+     * → 바로 수정 화면 이동
+     *
+     * 반복 일정
+     * → 수정 범위 선택
      * =====================================================
      */
 
@@ -876,19 +923,63 @@ export default function HomeScreen() {
                 schedule.id
             );
 
-            setScheduleInfoVisible(
-                false
+            const isRepeatSchedule =
+                schedule.repeatType !==
+                "none" &&
+                Boolean(
+                    schedule.seriesId
+                );
+
+            if (
+                !isRepeatSchedule
+            ) {
+                goToScheduleEdit(
+                    schedule,
+                    "single"
+                );
+
+                return;
+            }
+
+            Alert.alert(
+                "반복 일정 수정",
+                "수정할 일정의 범위를 선택해 주세요.",
+                [
+                    {
+                        text:
+                            "취소",
+
+                        style:
+                            "cancel",
+                    },
+
+                    {
+                        text:
+                            "이 일정만 수정",
+
+                        onPress:
+                            () => {
+                                goToScheduleEdit(
+                                    schedule,
+                                    "single"
+                                );
+                            },
+                    },
+
+                    {
+                        text:
+                            "이 일정 및 이후 일정",
+
+                        onPress:
+                            () => {
+                                goToScheduleEdit(
+                                    schedule,
+                                    "future"
+                                );
+                            },
+                    },
+                ]
             );
-
-            router.push({
-                pathname:
-                    "/schedule-edit",
-
-                params: {
-                    scheduleId:
-                    schedule.id,
-                },
-            });
         };
 
     /*
@@ -1463,22 +1554,24 @@ export default function HomeScreen() {
                                     아직 등록한 일정이 없어요.
                                 </Text>
 
-                                {session && ( <Pressable
-                                    style={
-                                        styles.addButton
-                                    }
-                                    onPress={
-                                        handleManualInput
-                                    }
-                                >
-                                       <Text
+                                {session && (
+                                    <Pressable
                                         style={
-                                            styles.addButtonText
+                                            styles.addButton
+                                        }
+                                        onPress={
+                                            handleManualInput
                                         }
                                     >
-                                        일정 직접 추가
-                                    </Text>
-                                </Pressable>)}
+                                        <Text
+                                            style={
+                                                styles.addButtonText
+                                            }
+                                        >
+                                            일정 직접 추가
+                                        </Text>
+                                    </Pressable>
+                                )}
                             </View>
                         ) : filteredSchedules.length ===
                         0 ? (

@@ -1,6 +1,5 @@
 import {
     Alert,
-    Modal,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -9,10 +8,13 @@ import {
     View,
 } from "react-native";
 
+import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
     useEffect,
     useMemo,
     useState,
+    type ReactNode,
 } from "react";
 
 import {
@@ -21,6 +23,7 @@ import {
 } from "expo-router";
 
 import { Ionicons } from "@expo/vector-icons";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
@@ -35,11 +38,9 @@ import {
     SchedulableTriggerInputTypes,
 } from "expo-notifications/build/Notifications.types";
 
-import { SafeAreaView } from "react-native-safe-area-context";
-
 import { STORAGE_KEYS } from "@/constants/storageKeys";
+
 import { useAuth } from "@/hooks/useAuth";
-import { AppLoadingScreen } from "@/components/ui/AppLoadingScreen";
 
 /*
  * =====================================================
@@ -58,8 +59,14 @@ type ScheduleStatus =
     | "completed"
     | "failed";
 
+type EditScope =
+    | "single"
+    | "future";
+
 type LocalSchedule = {
     id: string;
+
+    seriesId?: string | null;
 
     title: string;
 
@@ -80,12 +87,10 @@ type LocalSchedule = {
         string | null;
 };
 
-type SelectionModalType =
-    | "date"
-    | "time"
-    | "reminder"
-    | "repeat"
-    | null;
+type DateOption = {
+    label: string;
+    value: string;
+};
 
 type ReminderOption = {
     label: string;
@@ -97,11 +102,6 @@ type RepeatOption = {
     value: RepeatType;
 };
 
-type DateOption = {
-    label: string;
-    value: Date;
-};
-
 /*
  * =====================================================
  * 옵션
@@ -111,66 +111,97 @@ type DateOption = {
 const REMINDER_OPTIONS:
     ReminderOption[] = [
     {
-        label: "알림 없음",
-        value: null,
+        label:
+            "알림 없음",
+        value:
+            null,
     },
     {
-        label: "10분 전",
-        value: 10,
+        label:
+            "10분 전",
+        value:
+            10,
     },
     {
-        label: "20분 전",
-        value: 20,
+        label:
+            "20분 전",
+        value:
+            20,
     },
     {
-        label: "30분 전",
-        value: 30,
+        label:
+            "30분 전",
+        value:
+            30,
     },
     {
-        label: "1시간 전",
-        value: 60,
+        label:
+            "1시간 전",
+        value:
+            60,
     },
     {
-        label: "2시간 전",
-        value: 120,
+        label:
+            "2시간 전",
+        value:
+            120,
     },
 ];
 
 const REPEAT_OPTIONS:
     RepeatOption[] = [
     {
-        label: "반복 없음",
-        value: "none",
+        label:
+            "반복 없음",
+        value:
+            "none",
     },
     {
-        label: "매일",
-        value: "daily",
+        label:
+            "매일",
+        value:
+            "daily",
     },
     {
-        label: "평일",
-        value: "weekday",
+        label:
+            "평일",
+        value:
+            "weekday",
     },
     {
-        label: "매주",
-        value: "weekly",
+        label:
+            "매주",
+        value:
+            "weekly",
     },
 ];
 
-const HOURS =
+const PERIOD_OPTIONS = [
+    "오전",
+    "오후",
+] as const;
+
+const HOUR_OPTIONS =
     Array.from(
         {
             length: 12,
         },
-        (_, index) =>
+        (
+            _,
+            index
+        ) =>
             index + 1
     );
 
-const MINUTES =
+const MINUTE_OPTIONS =
     Array.from(
         {
             length: 60,
         },
-        (_, index) =>
+        (
+            _,
+            index
+        ) =>
             index
     );
 
@@ -190,42 +221,106 @@ function getScheduleStorageKey(
 
 /*
  * =====================================================
+ * 데이터 보정
+ * =====================================================
+ */
+
+function normalizeSchedule(
+    schedule:
+    LocalSchedule
+): LocalSchedule {
+    const normalizedStatus:
+        ScheduleStatus =
+        schedule.status ??
+        (
+            schedule.completed
+                ? "completed"
+                : "pending"
+        );
+
+    return {
+        ...schedule,
+
+        seriesId:
+            schedule.seriesId ??
+            null,
+
+        repeatType:
+            schedule.repeatType ??
+            "none",
+
+        status:
+        normalizedStatus,
+
+        completed:
+            normalizedStatus ===
+            "completed",
+
+        reminderMinutes:
+            schedule.reminderMinutes ??
+            null,
+
+        localNotificationId:
+            schedule.localNotificationId ??
+            null,
+    };
+}
+
+/*
+ * =====================================================
  * 날짜
  * =====================================================
  */
 
 function startOfDay(
-    date: Date
+    date:
+    Date
 ) {
-    const result =
-        new Date(date);
+    const next =
+        new Date(
+            date
+        );
 
-    result.setHours(
+    next.setHours(
         0,
         0,
         0,
         0
     );
 
-    return result;
+    return next;
 }
 
-function isSameDay(
-    first: Date,
-    second: Date
+function formatDateLabel(
+    date:
+    Date
 ) {
-    return (
-        first.getFullYear() ===
-        second.getFullYear() &&
-        first.getMonth() ===
-        second.getMonth() &&
-        first.getDate() ===
-        second.getDate()
-    );
+    const month =
+        date.getMonth() +
+        1;
+
+    const day =
+        date.getDate();
+
+    const weekday =
+        [
+            "일",
+            "월",
+            "화",
+            "수",
+            "목",
+            "금",
+            "토",
+        ][
+            date.getDay()
+            ];
+
+    return `${month}월 ${day}일 (${weekday})`;
 }
 
 function createDateOptions(
-    selectedDate: Date
+    selectedDate:
+    Date
 ): DateOption[] {
     const today =
         startOfDay(
@@ -235,12 +330,9 @@ function createDateOptions(
     const options:
         DateOption[] = [];
 
-    /*
-     * 현재 날짜부터 앞으로 30일
-     */
     for (
         let index = 0;
-        index < 30;
+        index <= 30;
         index += 1
     ) {
         const date =
@@ -253,108 +345,68 @@ function createDateOptions(
             index
         );
 
-        let prefix =
-            "";
+        let label =
+            formatDateLabel(
+                date
+            );
 
         if (
             index === 0
         ) {
-            prefix =
-                "오늘 · ";
+            label =
+                `오늘 · ${label}`;
         } else if (
             index === 1
         ) {
-            prefix =
-                "내일 · ";
+            label =
+                `내일 · ${label}`;
         } else if (
             index === 2
         ) {
-            prefix =
-                "모레 · ";
+            label =
+                `모레 · ${label}`;
         }
 
         options.push({
-            label:
-                `${prefix}${formatDate(
-                    date
-                )}`,
-
+            label,
             value:
-            date,
+                date.toISOString(),
         });
     }
 
-    /*
-     * 수정 중인 기존 일정 날짜가
-     * 기본 30일 범위 밖이라면
-     * 기존 날짜도 선택 목록에 포함합니다.
-     */
-    const hasSelectedDate =
+    const selectedDay =
+        startOfDay(
+            selectedDate
+        );
+
+    const exists =
         options.some(
             (
                 option
             ) =>
-                isSameDay(
-                    option.value,
-                    selectedDate
-                )
+                startOfDay(
+                    new Date(
+                        option.value
+                    )
+                ).getTime() ===
+                selectedDay.getTime()
         );
 
     if (
-        !hasSelectedDate
+        !exists
     ) {
         options.unshift({
             label:
-                formatDate(
+                formatDateLabel(
                     selectedDate
                 ),
 
             value:
-                startOfDay(
-                    selectedDate
-                ),
+                selectedDay.toISOString(),
         });
     }
 
     return options;
-}
-
-function formatDate(
-    date: Date
-) {
-    const year =
-        date.getFullYear();
-
-    const month =
-        date.getMonth() +
-        1;
-
-    const day =
-        date.getDate();
-
-    const weekdays = [
-        "일",
-        "월",
-        "화",
-        "수",
-        "목",
-        "금",
-        "토",
-    ];
-
-    return `${year}.${String(
-        month
-    ).padStart(
-        2,
-        "0"
-    )}.${String(
-        day
-    ).padStart(
-        2,
-        "0"
-    )} (${weekdays[
-        date.getDay()
-        ]})`;
 }
 
 /*
@@ -363,129 +415,143 @@ function formatDate(
  * =====================================================
  */
 
-function formatTime(
-    date: Date
+function convertTo12Hour(
+    date:
+    Date
 ) {
-    const hour =
+    const hour24 =
         date.getHours();
 
-    const minute =
-        date.getMinutes();
-
-    const period =
-        hour < 12
+    const period:
+        "오전" | "오후" =
+        hour24 < 12
             ? "오전"
             : "오후";
 
-    const displayHour =
-        hour % 12 === 0
-            ? 12
-            : hour % 12;
-
-    return `${period} ${displayHour}:${String(
-        minute
-    ).padStart(
-        2,
-        "0"
-    )}`;
-}
-
-function getPeriod(
-    date: Date
-):
-    | "오전"
-    | "오후" {
-    return date.getHours() <
-    12
-        ? "오전"
-        : "오후";
-}
-
-function getDisplayHour(
-    date: Date
-) {
     const hour =
-        date.getHours();
+        hour24 % 12 ===
+        0
+            ? 12
+            : hour24 % 12;
 
-    return hour % 12 === 0
+    return {
+        period,
+        hour,
+        minute:
+            date.getMinutes(),
+    };
+}
+
+function convertTo24Hour(
+    period:
+        "오전" | "오후",
+    hour:
+    number
+) {
+    if (
+        period ===
+        "오전"
+    ) {
+        return hour ===
+        12
+            ? 0
+            : hour;
+    }
+
+    return hour ===
+    12
         ? 12
-        : hour % 12;
+        : hour + 12;
 }
 
 function createScheduledDate(
-    date: Date,
+    date:
+    Date,
     period:
-        | "오전"
-        | "오후",
-    displayHour: number,
-    minute: number
+        "오전" | "오후",
+    hour:
+    number,
+    minute:
+    number
 ) {
-    const result =
-        new Date(date);
+    const nextDate =
+        new Date(
+            date
+        );
 
-    let hour =
-        displayHour %
-        12;
+    const hour24 =
+        convertTo24Hour(
+            period,
+            hour
+        );
 
-    if (
-        period ===
-        "오후"
-    ) {
-        hour += 12;
-    }
-
-    result.setHours(
-        hour,
+    nextDate.setHours(
+        hour24,
         minute,
         0,
         0
     );
 
-    return result;
+    return nextDate;
 }
 
 /*
  * =====================================================
- * 표시값
+ * 알림
  * =====================================================
  */
 
-function formatReminder(
-    value:
-        number | null
+async function createNotification(
+    schedule:
+    LocalSchedule
 ) {
-    const option =
-        REMINDER_OPTIONS.find(
-            (
-                item
-            ) =>
-                item.value ===
-                value
+    if (
+        schedule.reminderMinutes ==
+        null
+    ) {
+        return null;
+    }
+
+    const scheduledDate =
+        new Date(
+            schedule.scheduledAt
         );
 
-    return (
-        option?.label ??
-        "알림 없음"
-    );
-}
-
-function formatRepeat(
-    value:
-    RepeatType
-) {
-    const option =
-        REPEAT_OPTIONS.find(
-            (
-                item
-            ) =>
-                item.value ===
-                value
+    const notificationDate =
+        new Date(
+            scheduledDate.getTime() -
+            schedule.reminderMinutes *
+            60 *
+            1000
         );
 
-    return (
-        option?.label ??
-        "반복 없음"
-    );
+    if (
+        notificationDate.getTime() <=
+        Date.now()
+    ) {
+        return null;
+    }
+
+    return await scheduleNotificationAsync({
+        content: {
+            title:
+            schedule.title,
+
+            body:
+                "예정된 일정이 곧 시작돼요.",
+
+            sound:
+                true,
+        },
+
+        trigger: {
+            type:
+            SchedulableTriggerInputTypes.DATE,
+
+            date:
+            notificationDate,
+        },
+    });
 }
 
 /*
@@ -500,19 +566,36 @@ export default function ScheduleEditScreen() {
     } =
         useAuth();
 
-    const {
-        scheduleId,
-    } =
+    const params =
         useLocalSearchParams<{
-            scheduleId?: string;
+            scheduleId?:
+                string;
+
+            editScope?:
+                string;
         }>();
 
+    const scheduleId =
+        typeof params.scheduleId ===
+        "string"
+            ? params.scheduleId
+            : undefined;
+
+    const editScope:
+        EditScope =
+        params.editScope ===
+        "future"
+            ? "future"
+            : "single";
+
     const [
-        loading,
-        setLoading,
+        schedules,
+        setSchedules,
     ] =
-        useState(
-            true
+        useState<
+            LocalSchedule[]
+        >(
+            []
         );
 
     const [
@@ -523,6 +606,22 @@ export default function ScheduleEditScreen() {
             LocalSchedule | null
         >(
             null
+        );
+
+    const [
+        loading,
+        setLoading,
+    ] =
+        useState(
+            true
+        );
+
+    const [
+        saving,
+        setSaving,
+    ] =
+        useState(
+            false
         );
 
     const [
@@ -554,8 +653,7 @@ export default function ScheduleEditScreen() {
         setPeriod,
     ] =
         useState<
-            | "오전"
-            | "오후"
+            "오전" | "오후"
         >(
             "오전"
         );
@@ -565,7 +663,7 @@ export default function ScheduleEditScreen() {
         setHour,
     ] =
         useState(
-            9
+            12
         );
 
     const [
@@ -596,27 +694,9 @@ export default function ScheduleEditScreen() {
             "none"
         );
 
-    const [
-        selectionModal,
-        setSelectionModal,
-    ] =
-        useState<
-            SelectionModalType
-        >(
-            null
-        );
-
-    const [
-        saving,
-        setSaving,
-    ] =
-        useState(
-            false
-        );
-
     /*
      * =====================================================
-     * 일정 불러오기
+     * 일정 로드
      * =====================================================
      */
 
@@ -627,28 +707,28 @@ export default function ScheduleEditScreen() {
 
             const loadSchedule =
                 async () => {
-                    if (
-                        !scheduleId
-                    ) {
-                        Alert.alert(
-                            "일정을 찾을 수 없어요",
-                            "수정할 일정 정보가 없습니다.",
-                            [
-                                {
-                                    text:
-                                        "확인",
-
-                                    onPress:
-                                        () =>
-                                            router.back(),
-                                },
-                            ]
-                        );
-
-                        return;
-                    }
-
                     try {
+                        if (
+                            !scheduleId
+                        ) {
+                            Alert.alert(
+                                "일정을 찾지 못했어요",
+                                "수정할 일정 정보가 없습니다.",
+                                [
+                                    {
+                                        text:
+                                            "확인",
+
+                                        onPress:
+                                            () =>
+                                                router.back(),
+                                    },
+                                ]
+                            );
+
+                            return;
+                        }
+
                         const storageKey =
                             getScheduleStorageKey(
                                 session
@@ -656,22 +736,22 @@ export default function ScheduleEditScreen() {
                                     .id
                             );
 
-                        const storedSchedules =
+                        const stored =
                             await AsyncStorage.getItem(
                                 storageKey
                             );
 
                         if (
-                            !storedSchedules
+                            !stored
                         ) {
                             throw new Error(
-                                "저장된 일정이 없습니다."
+                                "stored schedule not found"
                             );
                         }
 
                         const parsed =
                             JSON.parse(
-                                storedSchedules
+                                stored
                             );
 
                         if (
@@ -680,26 +760,35 @@ export default function ScheduleEditScreen() {
                             )
                         ) {
                             throw new Error(
-                                "일정 데이터 형식이 올바르지 않습니다."
+                                "invalid stored schedules"
                             );
                         }
 
-                        const foundSchedule:
-                            LocalSchedule | undefined =
-                            parsed.find(
+                        const normalized:
+                            LocalSchedule[] =
+                            parsed.map(
                                 (
-                                    schedule:
-                                    LocalSchedule
+                                    schedule
+                                ) =>
+                                    normalizeSchedule(
+                                        schedule
+                                    )
+                            );
+
+                        const target =
+                            normalized.find(
+                                (
+                                    schedule
                                 ) =>
                                     schedule.id ===
                                     scheduleId
                             );
 
                         if (
-                            !foundSchedule
+                            !target
                         ) {
                             throw new Error(
-                                "수정할 일정을 찾을 수 없습니다."
+                                "target schedule not found"
                             );
                         }
 
@@ -709,103 +798,84 @@ export default function ScheduleEditScreen() {
                             return;
                         }
 
-                        const scheduledDate =
-                            new Date(
-                                foundSchedule.scheduledAt
-                            );
-
-                        const normalizedSchedule:
-                            LocalSchedule = {
-                            ...foundSchedule,
-
-                            repeatType:
-                                foundSchedule.repeatType ??
-                                "none",
-
-                            status:
-                                foundSchedule.status ??
-                                (
-                                    foundSchedule.completed
-                                        ? "completed"
-                                        : "pending"
-                                ),
-
-                            completed:
-                                (
-                                    foundSchedule.status ??
-                                    (
-                                        foundSchedule.completed
-                                            ? "completed"
-                                            : "pending"
-                                    )
-                                ) ===
-                                "completed",
-                        };
+                        setSchedules(
+                            normalized
+                        );
 
                         setOriginalSchedule(
-                            normalizedSchedule
+                            target
                         );
 
                         setTitle(
-                            normalizedSchedule.title
+                            target.title
                         );
 
                         setMemo(
-                            normalizedSchedule.memo ??
+                            target.memo ??
                             ""
                         );
+
+                        const scheduledDate =
+                            new Date(
+                                target.scheduledAt
+                            );
 
                         setSelectedDate(
                             scheduledDate
                         );
 
-                        setPeriod(
-                            getPeriod(
+                        const converted =
+                            convertTo12Hour(
                                 scheduledDate
-                            )
+                            );
+
+                        setPeriod(
+                            converted.period
                         );
 
                         setHour(
-                            getDisplayHour(
-                                scheduledDate
-                            )
+                            converted.hour
                         );
 
                         setMinute(
-                            scheduledDate.getMinutes()
+                            converted.minute
                         );
 
                         setReminderMinutes(
-                            normalizedSchedule.reminderMinutes ??
+                            target.reminderMinutes ??
                             null
                         );
 
                         setRepeatType(
-                            normalizedSchedule.repeatType ??
+                            target.repeatType ??
                             "none"
                         );
                     } catch (
                         error
                         ) {
                         console.error(
-                            "일정 수정 데이터 불러오기 오류:",
+                            "일정 수정 데이터 로드 오류:",
                             error
                         );
 
-                        Alert.alert(
-                            "일정을 불러오지 못했어요",
-                            "잠시 후 다시 시도해 주세요.",
-                            [
-                                {
-                                    text:
-                                        "확인",
+                        if (
+                            mounted
+                        ) {
+                            Alert.alert(
+                                "일정을 불러오지 못했어요",
+                                "잠시 후 다시 시도해 주세요.",
+                                [
+                                    {
+                                        text:
+                                            "확인",
 
-                                    onPress:
-                                        () =>
-                                            router.back(),
-                                },
-                            ]
-                        );
+                                        onPress:
+                                            () =>
+                                                router.back(),
+                                    },
+                                ]
+                            );
+                        }
                     } finally {
                         if (
                             mounted
@@ -834,7 +904,7 @@ export default function ScheduleEditScreen() {
 
     /*
      * =====================================================
-     * 날짜 선택 옵션
+     * 날짜 옵션
      * =====================================================
      */
 
@@ -846,29 +916,6 @@ export default function ScheduleEditScreen() {
                 ),
             [
                 selectedDate,
-            ]
-        );
-
-    /*
-     * =====================================================
-     * 현재 선택된 일정 시간
-     * =====================================================
-     */
-
-    const currentScheduledDate =
-        useMemo(
-            () =>
-                createScheduledDate(
-                    selectedDate,
-                    period,
-                    hour,
-                    minute
-                ),
-            [
-                selectedDate,
-                period,
-                hour,
-                minute,
             ]
         );
 
@@ -895,33 +942,41 @@ export default function ScheduleEditScreen() {
                 0
             ) {
                 Alert.alert(
-                    "제목을 입력해 주세요",
-                    "일정 제목은 필수예요."
+                    "제목을 입력해 주세요"
                 );
 
                 return;
             }
 
-            /*
-             * 기존 일정의 날짜/시간을 실제로 변경한 경우에만
-             * '최소 30분 후' 정책을 적용합니다.
-             *
-             * 예:
-             * 일정이 10분 뒤인데 메모만 수정하는 경우
-             * 저장을 막지 않습니다.
-             */
-            const originalTime =
+            const nextSelectedDate =
+                createScheduledDate(
+                    selectedDate,
+                    period,
+                    hour,
+                    minute
+                );
+
+            const originalDate =
                 new Date(
                     originalSchedule.scheduledAt
-                ).getTime();
+                );
 
-            const nextTime =
-                currentScheduledDate.getTime();
-
+            /*
+             * 날짜/시간이 실제로 바뀌었는지 확인합니다.
+             */
             const scheduleTimeChanged =
-                originalTime !==
-                nextTime;
+                originalDate.getTime() !==
+                nextSelectedDate.getTime();
 
+            /*
+             * 기존 정책:
+             *
+             * 일정 시간을 수정한 경우에만
+             * 현재 기준 최소 30분 이후 일정인지 검사합니다.
+             *
+             * 제목/메모 등만 수정할 때는
+             * 기존 일정 시간이 가까워도 수정할 수 있습니다.
+             */
             if (
                 scheduleTimeChanged
             ) {
@@ -934,266 +989,427 @@ export default function ScheduleEditScreen() {
                     );
 
                 if (
-                    currentScheduledDate.getTime() <
+                    nextSelectedDate.getTime() <
                     minimumDate.getTime()
                 ) {
                     Alert.alert(
-                        "시간을 다시 선택해 주세요",
-                        "최소 30분 후의 시간을 선택해 주세요."
+                        "시간을 확인해 주세요",
+                        "일정은 현재 시간 기준 30분 이후로 설정해 주세요."
                     );
 
                     return;
                 }
             }
 
-            const oldReminder =
-                originalSchedule.reminderMinutes ??
-                null;
-
-            const notificationSettingChanged =
-                scheduleTimeChanged ||
-                oldReminder !==
-                reminderMinutes;
-
             setSaving(
                 true
             );
 
-            let newNotificationId:
-                string | null =
-                originalSchedule.localNotificationId ??
-                null;
+            const storageKey =
+                getScheduleStorageKey(
+                    session
+                        ?.user
+                        .id
+                );
 
-            let newlyScheduledNotificationId:
-                string | null =
-                null;
+            /*
+             * 선택한 일정이 움직인 시간 차이입니다.
+             *
+             * future 수정에서는
+             * 이 차이를 이후 모든 일정에 동일하게 적용합니다.
+             */
+            const timeDelta =
+                nextSelectedDate.getTime() -
+                originalDate.getTime();
 
-            let notificationSchedulingFailed =
-                false;
+            let affectedSchedules:
+                LocalSchedule[] = [];
 
-            try {
-                /*
-                 * =====================================================
-                 * 알림 재예약
-                 *
-                 * 일정 시간 또는 알림 설정이 변경된 경우에만
-                 * 새로운 알림을 예약합니다.
-                 * =====================================================
-                 */
+            /*
+             * =====================================================
+             * 수정 대상 선택
+             * =====================================================
+             */
 
-                if (
-                    notificationSettingChanged
-                ) {
-                    newNotificationId =
-                        null;
+            if (
+                editScope ===
+                "future" &&
+                originalSchedule.seriesId
+            ) {
+                const originalTime =
+                    originalDate.getTime();
 
-                    if (
-                        reminderMinutes !==
-                        null
-                    ) {
-                        const notificationDate =
+                affectedSchedules =
+                    schedules.filter(
+                        (
+                            schedule
+                        ) =>
+                            schedule.seriesId ===
+                            originalSchedule.seriesId &&
                             new Date(
-                                currentScheduledDate.getTime() -
-                                reminderMinutes *
-                                60 *
-                                1000
-                            );
-
-                        /*
-                         * 알림 시간이 이미 지난 경우
-                         * 잘못된 즉시 알림을 만들지 않습니다.
-                         */
-                        if (
-                            notificationDate.getTime() >
-                            Date.now()
-                        ) {
-                            try {
-                                newlyScheduledNotificationId =
-                                    await scheduleNotificationAsync(
-                                        {
-                                            content: {
-                                                title:
-                                                trimmedTitle,
-
-                                                body:
-                                                    "예정된 일정이 있어요.",
-
-                                                data: {
-                                                    scheduleId:
-                                                    originalSchedule.id,
-                                                },
-                                            },
-
-                                            trigger: {
-                                                type:
-                                                SchedulableTriggerInputTypes.DATE,
-
-                                                date:
-                                                notificationDate,
-                                            },
-                                        }
-                                    );
-
-                                newNotificationId =
-                                    newlyScheduledNotificationId;
-                            } catch (
-                                notificationError
-                                ) {
-                                console.error(
-                                    "수정 일정 알림 예약 오류:",
-                                    notificationError
-                                );
-
-                                notificationSchedulingFailed =
-                                    true;
-
-                                newNotificationId =
-                                    null;
-                            }
-                        } else {
-                            /*
-                             * 예:
-                             * 일정은 40분 뒤인데
-                             * 1시간 전 알림으로 수정한 경우.
-                             */
-                            notificationSchedulingFailed =
-                                true;
-                        }
-                    }
-                }
-
-                const storageKey =
-                    getScheduleStorageKey(
-                        session
-                            ?.user
-                            .id
+                                schedule.scheduledAt
+                            ).getTime() >=
+                            originalTime
                     );
-
-                const storedSchedules =
-                    await AsyncStorage.getItem(
-                        storageKey
-                    );
-
-                const parsedSchedules:
-                    LocalSchedule[] =
-                    storedSchedules
-                        ? JSON.parse(
-                            storedSchedules
-                        )
-                        : [];
-
-                if (
-                    !Array.isArray(
-                        parsedSchedules
-                    )
-                ) {
-                    throw new Error(
-                        "저장된 일정 데이터가 올바르지 않습니다."
-                    );
-                }
-
-                const updatedSchedule:
-                    LocalSchedule = {
-                    ...originalSchedule,
-
-                    /*
-                     * 기존 ID와 상태는 유지합니다.
-                     */
-                    id:
-                    originalSchedule.id,
-
-                    status:
-                    originalSchedule.status,
-
-                    completed:
-                        originalSchedule.status ===
-                        "completed",
-
-                    title:
-                    trimmedTitle,
-
-                    memo:
-                        memo.trim()
-                            .length >
-                        0
-                            ? memo.trim()
-                            : null,
-
-                    scheduledAt:
-                        currentScheduledDate.toISOString(),
-
-                    reminderMinutes,
-
-                    repeatType,
-
-                    localNotificationId:
-                        notificationSettingChanged
-                            ? newNotificationId
-                            : originalSchedule.localNotificationId ??
-                            null,
-                };
-
-                const updatedSchedules =
-                    parsedSchedules.map(
+            } else {
+                affectedSchedules =
+                    schedules.filter(
                         (
                             schedule
                         ) =>
                             schedule.id ===
                             originalSchedule.id
-                                ? updatedSchedule
-                                : schedule
                     );
+            }
 
-                await AsyncStorage.setItem(
-                    storageKey,
-                    JSON.stringify(
-                        updatedSchedules
-                    )
+            if (
+                affectedSchedules.length ===
+                0
+            ) {
+                setSaving(
+                    false
                 );
 
+                Alert.alert(
+                    "수정할 일정을 찾지 못했어요"
+                );
+
+                return;
+            }
+
+            /*
+             * 저장 실패 시 rollback 하기 위해
+             * 새롭게 생성된 notification ID를 모아둡니다.
+             */
+            const newlyCreatedNotificationIds:
+                string[] = [];
+
+            /*
+             * 저장 완료 후 취소할
+             * 기존 notification ID입니다.
+             */
+            const oldNotificationIdsToCancel:
+                string[] = [];
+
+            let notificationFailed =
+                false;
+
+            try {
+                const affectedIds =
+                    new Set(
+                        affectedSchedules.map(
+                            (
+                                schedule
+                            ) =>
+                                schedule.id
+                        )
+                    );
+
+                const updatedSchedules:
+                    LocalSchedule[] = [];
+
                 /*
-                 * 새로운 데이터를 정상 저장한 뒤에
-                 * 기존 알림을 취소합니다.
-                 *
-                 * Storage 저장이 실패했을 때
-                 * 기존 알림까지 먼저 사라지는 문제를 피하기 위함입니다.
+                 * =====================================================
+                 * 수정 대상 일정 생성
+                 * =====================================================
                  */
-                if (
-                    notificationSettingChanged &&
-                    originalSchedule.localNotificationId &&
-                    originalSchedule.localNotificationId !==
-                    newNotificationId
-                ) {
-                    try {
-                        await cancelScheduledNotificationAsync(
-                            originalSchedule.localNotificationId
+
+                for (
+                    const schedule
+                    of affectedSchedules
+                    ) {
+                    const isSelectedSchedule =
+                        schedule.id ===
+                        originalSchedule.id;
+
+                    let nextScheduledAt:
+                        string;
+
+                    if (
+                        editScope ===
+                        "future"
+                    ) {
+                        const previousDate =
+                            new Date(
+                                schedule.scheduledAt
+                            );
+
+                        nextScheduledAt =
+                            new Date(
+                                previousDate.getTime() +
+                                timeDelta
+                            ).toISOString();
+                    } else {
+                        nextScheduledAt =
+                            nextSelectedDate.toISOString();
+                    }
+
+                    const updated:
+                        LocalSchedule = {
+                        ...schedule,
+
+                        title:
+                        trimmedTitle,
+
+                        memo:
+                            memo.trim().length >
+                            0
+                                ? memo.trim()
+                                : null,
+
+                        scheduledAt:
+                        nextScheduledAt,
+
+                        repeatType,
+
+                        reminderMinutes,
+
+                        /*
+                         * 상태는 기존 일정 각각의 상태를 유지합니다.
+                         */
+                        status:
+                        schedule.status,
+
+                        completed:
+                            schedule.status ===
+                            "completed",
+
+                        /*
+                         * 새 알림 예약 결과를 아래에서 다시 넣습니다.
+                         */
+                        localNotificationId:
+                            null,
+                    };
+
+                    /*
+                     * 알림 내용에 제목이 들어가기 때문에
+                     * 제목 수정도 재예약 대상입니다.
+                     */
+                    const titleChanged =
+                        schedule.title !==
+                        trimmedTitle;
+
+                    const reminderChanged =
+                        (
+                            schedule.reminderMinutes ??
+                            null
+                        ) !==
+                        reminderMinutes;
+
+                    const timeChanged =
+                        schedule.scheduledAt !==
+                        nextScheduledAt;
+
+                    const notificationNeedsUpdate =
+                        titleChanged ||
+                        reminderChanged ||
+                        timeChanged;
+
+                    if (
+                        !notificationNeedsUpdate
+                    ) {
+                        updated.localNotificationId =
+                            schedule.localNotificationId ??
+                            null;
+
+                        updatedSchedules.push(
+                            updated
                         );
+
+                        continue;
+                    }
+
+                    if (
+                        schedule.localNotificationId
+                    ) {
+                        oldNotificationIdsToCancel.push(
+                            schedule.localNotificationId
+                        );
+                    }
+
+                    if (
+                        reminderMinutes ==
+                        null
+                    ) {
+                        updated.localNotificationId =
+                            null;
+
+                        updatedSchedules.push(
+                            updated
+                        );
+
+                        continue;
+                    }
+
+                    try {
+                        const newNotificationId =
+                            await createNotification(
+                                updated
+                            );
+
+                        if (
+                            newNotificationId
+                        ) {
+                            updated.localNotificationId =
+                                newNotificationId;
+
+                            newlyCreatedNotificationIds.push(
+                                newNotificationId
+                            );
+                        } else {
+                            updated.localNotificationId =
+                                null;
+
+                            notificationFailed =
+                                true;
+                        }
                     } catch (
-                        notificationCancelError
+                        notificationError
                         ) {
                         console.error(
-                            "기존 일정 알림 취소 오류:",
-                            notificationCancelError
+                            "수정 일정 알림 재예약 오류:",
+                            notificationError
+                        );
+
+                        updated.localNotificationId =
+                            null;
+
+                        notificationFailed =
+                            true;
+                    }
+
+                    updatedSchedules.push(
+                        updated
+                    );
+
+                    if (
+                        isSelectedSchedule
+                    ) {
+                        console.log(
+                            "선택 일정 수정:",
+                            updated.id
                         );
                     }
                 }
 
+                /*
+                 * =====================================================
+                 * 전체 일정 배열에 수정 결과 반영
+                 * =====================================================
+                 */
+
+                const updatedMap =
+                    new Map<
+                        string,
+                        LocalSchedule
+                    >();
+
+                updatedSchedules.forEach(
+                    (
+                        schedule
+                    ) => {
+                        updatedMap.set(
+                            schedule.id,
+                            schedule
+                        );
+                    }
+                );
+
+                const nextSchedules =
+                    schedules.map(
+                        (
+                            schedule
+                        ) => {
+                            if (
+                                !affectedIds.has(
+                                    schedule.id
+                                )
+                            ) {
+                                return schedule;
+                            }
+
+                            return (
+                                updatedMap.get(
+                                    schedule.id
+                                ) ??
+                                schedule
+                            );
+                        }
+                    );
+
+                /*
+                 * =====================================================
+                 * Storage 저장
+                 * =====================================================
+                 */
+
+                await AsyncStorage.setItem(
+                    storageKey,
+                    JSON.stringify(
+                        nextSchedules
+                    )
+                );
+
+                /*
+                 * =====================================================
+                 * 기존 알림 취소
+                 *
+                 * Storage 저장 성공 후 취소합니다.
+                 * =====================================================
+                 */
+
+                for (
+                    const notificationId
+                    of oldNotificationIdsToCancel
+                    ) {
+                    try {
+                        await cancelScheduledNotificationAsync(
+                            notificationId
+                        );
+                    } catch (
+                        cancelError
+                        ) {
+                        console.error(
+                            "기존 알림 취소 오류:",
+                            cancelError
+                        );
+                    }
+                }
+
+                console.log(
+                    "일정 수정 완료:",
+                    {
+                        scheduleId:
+                        originalSchedule.id,
+
+                        editScope,
+
+                        affectedCount:
+                        updatedSchedules.length,
+
+                        seriesId:
+                            originalSchedule.seriesId ??
+                            null,
+                    }
+                );
+
                 if (
-                    notificationSchedulingFailed
+                    notificationFailed
                 ) {
                     Alert.alert(
                         "일정은 수정됐어요",
-                        "다만 선택한 알림 시간은 예약하지 못했어요.",
+                        "다만 일부 알림은 예약하지 못했어요.",
                         [
                             {
                                 text:
                                     "확인",
 
                                 onPress:
-                                    () =>
+                                    () => {
                                         router.replace(
                                             "/"
-                                        ),
+                                        );
+                                    },
                             },
                         ]
                     );
@@ -1213,23 +1429,23 @@ export default function ScheduleEditScreen() {
                 );
 
                 /*
-                 * 새 알림까지 만든 뒤 Storage 저장이 실패했다면
-                 * 방금 만든 새 알림을 제거해서
-                 * 고아 알림이 남지 않게 합니다.
+                 * Storage 저장 전에 새 알림이 생성됐다가
+                 * 저장이 실패했으면 새 알림을 rollback 합니다.
                  */
-                if (
-                    newlyScheduledNotificationId
-                ) {
+                for (
+                    const notificationId
+                    of newlyCreatedNotificationIds
+                    ) {
                     try {
                         await cancelScheduledNotificationAsync(
-                            newlyScheduledNotificationId
+                            notificationId
                         );
                     } catch (
-                        notificationRollbackError
+                        rollbackError
                         ) {
                         console.error(
-                            "신규 알림 롤백 오류:",
-                            notificationRollbackError
+                            "신규 알림 rollback 오류:",
+                            rollbackError
                         );
                     }
                 }
@@ -1245,19 +1461,43 @@ export default function ScheduleEditScreen() {
             }
         };
 
+    /*
+     * =====================================================
+     * Loading
+     * =====================================================
+     */
+
     if (
         loading
     ) {
         return (
-            <AppLoadingScreen />
+            <SafeAreaView
+                style={
+                    styles.safeArea
+                }
+            >
+                <View
+                    style={
+                        styles.loadingArea
+                    }
+                >
+                    <Text
+                        style={
+                            styles.loadingText
+                        }
+                    >
+                        일정을 불러오는 중이에요
+                    </Text>
+                </View>
+            </SafeAreaView>
         );
     }
 
-    if (
-        !originalSchedule
-    ) {
-        return null;
-    }
+    /*
+     * =====================================================
+     * UI
+     * =====================================================
+     */
 
     return (
         <SafeAreaView
@@ -1270,28 +1510,20 @@ export default function ScheduleEditScreen() {
                     styles.container
                 }
             >
-                {/*
-                 * =====================================================
-                 * Header
-                 * =====================================================
-                 */}
                 <View
                     style={
                         styles.header
                     }
                 >
                     <Pressable
-                        style={
-                            styles.headerIconButton
-                        }
                         onPress={() =>
                             router.back()
                         }
                         hitSlop={10}
                     >
                         <Ionicons
-                            name="chevron-back"
-                            size={27}
+                            name="chevron-back-outline"
+                            size={28}
                             color="#111111"
                         />
                     </Pressable>
@@ -1306,10 +1538,33 @@ export default function ScheduleEditScreen() {
 
                     <View
                         style={
-                            styles.headerSpacer
+                            styles.headerRightSpace
                         }
                     />
                 </View>
+
+                {editScope ===
+                    "future" && (
+                        <View
+                            style={
+                                styles.scopeBanner
+                            }
+                        >
+                            <Ionicons
+                                name="repeat-outline"
+                                size={18}
+                                color="#D67C83"
+                            />
+
+                            <Text
+                                style={
+                                    styles.scopeBannerText
+                                }
+                            >
+                                이 일정 및 이후 반복 일정이 함께 수정돼요.
+                            </Text>
+                        </View>
+                    )}
 
                 <ScrollView
                     style={
@@ -1318,29 +1573,14 @@ export default function ScheduleEditScreen() {
                     contentContainerStyle={
                         styles.scrollContent
                     }
-                    keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={
                         false
                     }
+                    keyboardShouldPersistTaps="handled"
                 >
-                    {/*
-                     * =====================================================
-                     * 제목
-                     * =====================================================
-                     */}
-                    <View
-                        style={
-                            styles.fieldGroup
-                        }
+                    <Section
+                        title="제목"
                     >
-                        <Text
-                            style={
-                                styles.fieldLabel
-                            }
-                        >
-                            제목
-                        </Text>
-
                         <TextInput
                             style={
                                 styles.titleInput
@@ -1352,162 +1592,278 @@ export default function ScheduleEditScreen() {
                                 setTitle
                             }
                             placeholder="일정 제목을 입력해 주세요"
-                            placeholderTextColor="#A4A6AC"
+                            placeholderTextColor="#B3B5BA"
                             maxLength={100}
                         />
-                    </View>
+                    </Section>
 
-                    {/*
-                     * =====================================================
-                     * 날짜
-                     * =====================================================
-                     */}
-                    <SettingRow
-                        icon="calendar-outline"
-                        label="날짜"
-                        value={formatDate(
-                            selectedDate
-                        )}
-                        onPress={() =>
-                            setSelectionModal(
-                                "date"
-                            )
-                        }
-                    />
-
-                    {/*
-                     * =====================================================
-                     * 시간
-                     * =====================================================
-                     */}
-                    <SettingRow
-                        icon="time-outline"
-                        label="시간"
-                        value={formatTime(
-                            currentScheduledDate
-                        )}
-                        onPress={() =>
-                            setSelectionModal(
-                                "time"
-                            )
-                        }
-                    />
-
-                    {/*
-                     * =====================================================
-                     * 알림
-                     * =====================================================
-                     */}
-                    <SettingRow
-                        icon="notifications-outline"
-                        label="알림"
-                        value={formatReminder(
-                            reminderMinutes
-                        )}
-                        onPress={() =>
-                            setSelectionModal(
-                                "reminder"
-                            )
-                        }
-                    />
-
-                    {/*
-                     * =====================================================
-                     * 반복
-                     * =====================================================
-                     */}
-                    <SettingRow
-                        icon="repeat-outline"
-                        label="반복"
-                        value={formatRepeat(
-                            repeatType
-                        )}
-                        onPress={() =>
-                            setSelectionModal(
-                                "repeat"
-                            )
-                        }
-                    />
-
-                    {repeatType ===
-                        "weekday" && (
-                            <View
-                                style={
-                                    styles.weekdayInfo
-                                }
-                            >
-                                <Ionicons
-                                    name="information-circle-outline"
-                                    size={18}
-                                    color="#B96F72"
-                                />
-
-                                <Text
-                                    style={
-                                        styles.weekdayInfoText
-                                    }
-                                >
-                                    공휴일 포함 월~금 반복해요.
-                                </Text>
-                            </View>
-                        )}
-
-                    {/*
-                     * =====================================================
-                     * 메모
-                     * =====================================================
-                     */}
-                    <View
-                        style={
-                            styles.memoGroup
-                        }
+                    <Section
+                        title="날짜"
                     >
-                        <Text
-                            style={
-                                styles.fieldLabel
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={
+                                false
+                            }
+                            contentContainerStyle={
+                                styles.horizontalOptions
                             }
                         >
-                            메모
-                        </Text>
+                            {dateOptions.map(
+                                (
+                                    option
+                                ) => {
+                                    const optionDate =
+                                        startOfDay(
+                                            new Date(
+                                                option.value
+                                            )
+                                        );
 
+                                    const currentDate =
+                                        startOfDay(
+                                            selectedDate
+                                        );
+
+                                    const selected =
+                                        optionDate.getTime() ===
+                                        currentDate.getTime();
+
+                                    return (
+                                        <OptionButton
+                                            key={
+                                                option.value
+                                            }
+                                            label={
+                                                option.label
+                                            }
+                                            selected={
+                                                selected
+                                            }
+                                            onPress={() => {
+                                                const nextDate =
+                                                    new Date(
+                                                        option.value
+                                                    );
+
+                                                nextDate.setHours(
+                                                    selectedDate.getHours(),
+                                                    selectedDate.getMinutes(),
+                                                    0,
+                                                    0
+                                                );
+
+                                                setSelectedDate(
+                                                    nextDate
+                                                );
+                                            }}
+                                        />
+                                    );
+                                }
+                            )}
+                        </ScrollView>
+                    </Section>
+
+                    <Section
+                        title="시간"
+                    >
                         <View
                             style={
-                                styles.memoInputContainer
+                                styles.timePickerRow
                             }
                         >
-                            <TextInput
-                                style={
-                                    styles.memoInput
+                            <PickerColumn
+                                values={
+                                    PERIOD_OPTIONS
                                 }
-                                value={
-                                    memo
+                                selectedValue={
+                                    period
                                 }
-                                onChangeText={
-                                    setMemo
+                                formatValue={(
+                                    value
+                                ) =>
+                                    value
                                 }
-                                placeholder="메모를 입력해 주세요"
-                                placeholderTextColor="#A4A6AC"
-                                multiline
-                                textAlignVertical="top"
-                                maxLength={500}
+                                onSelect={(
+                                    value
+                                ) =>
+                                    setPeriod(
+                                        value
+                                    )
+                                }
                             />
 
-                            <Text
-                                style={
-                                    styles.memoCount
+                            <PickerColumn
+                                values={
+                                    HOUR_OPTIONS
                                 }
-                            >
-                                {memo.length}/500
-                            </Text>
+                                selectedValue={
+                                    hour
+                                }
+                                formatValue={(
+                                    value
+                                ) =>
+                                    `${value}시`
+                                }
+                                onSelect={(
+                                    value
+                                ) =>
+                                    setHour(
+                                        value
+                                    )
+                                }
+                            />
+
+                            <PickerColumn
+                                values={
+                                    MINUTE_OPTIONS
+                                }
+                                selectedValue={
+                                    minute
+                                }
+                                formatValue={(
+                                    value
+                                ) =>
+                                    `${String(
+                                        value
+                                    ).padStart(
+                                        2,
+                                        "0"
+                                    )}분`
+                                }
+                                onSelect={(
+                                    value
+                                ) =>
+                                    setMinute(
+                                        value
+                                    )
+                                }
+                            />
                         </View>
-                    </View>
+                    </Section>
+
+                    <Section
+                        title="알림"
+                    >
+                        <View
+                            style={
+                                styles.optionWrap
+                            }
+                        >
+                            {REMINDER_OPTIONS.map(
+                                (
+                                    option
+                                ) => (
+                                    <OptionButton
+                                        key={
+                                            option.label
+                                        }
+                                        label={
+                                            option.label
+                                        }
+                                        selected={
+                                            reminderMinutes ===
+                                            option.value
+                                        }
+                                        onPress={() =>
+                                            setReminderMinutes(
+                                                option.value
+                                            )
+                                        }
+                                    />
+                                )
+                            )}
+                        </View>
+                    </Section>
+
+                    <Section
+                        title="반복"
+                    >
+                        <View
+                            style={
+                                styles.optionWrap
+                            }
+                        >
+                            {REPEAT_OPTIONS.map(
+                                (
+                                    option
+                                ) => (
+                                    <OptionButton
+                                        key={
+                                            option.value
+                                        }
+                                        label={
+                                            option.label
+                                        }
+                                        selected={
+                                            repeatType ===
+                                            option.value
+                                        }
+                                        onPress={() =>
+                                            setRepeatType(
+                                                option.value
+                                            )
+                                        }
+                                    />
+                                )
+                            )}
+                        </View>
+
+                        {repeatType ===
+                            "weekday" && (
+                                <View
+                                    style={
+                                        styles.weekdayInfo
+                                    }
+                                >
+                                    <Ionicons
+                                        name="information-circle-outline"
+                                        size={17}
+                                        color="#D67C83"
+                                    />
+
+                                    <Text
+                                        style={
+                                            styles.weekdayInfoText
+                                        }
+                                    >
+                                        공휴일 포함 월~금 반복해요.
+                                    </Text>
+                                </View>
+                            )}
+                    </Section>
+
+                    <Section
+                        title="메모"
+                    >
+                        <TextInput
+                            style={
+                                styles.memoInput
+                            }
+                            value={
+                                memo
+                            }
+                            onChangeText={
+                                setMemo
+                            }
+                            placeholder="메모를 입력해 주세요"
+                            placeholderTextColor="#B3B5BA"
+                            multiline
+                            maxLength={500}
+                            textAlignVertical="top"
+                        />
+
+                        <Text
+                            style={
+                                styles.memoCount
+                            }
+                        >
+                            {memo.length}
+                            /500
+                        </Text>
+                    </Section>
                 </ScrollView>
 
-                {/*
-                 * =====================================================
-                 * 저장
-                 * =====================================================
-                 */}
                 <View
                     style={
                         styles.bottomArea
@@ -1520,9 +1876,9 @@ export default function ScheduleEditScreen() {
                             saving &&
                             styles.saveButtonDisabled,
                         ]}
-                        onPress={() =>
-                            void handleSave()
-                        }
+                        onPress={() => {
+                            void handleSave();
+                        }}
                         disabled={
                             saving
                         }
@@ -1538,282 +1894,6 @@ export default function ScheduleEditScreen() {
                         </Text>
                     </Pressable>
                 </View>
-
-                {/*
-                 * =====================================================
-                 * 날짜 Modal
-                 * =====================================================
-                 */}
-                <SelectionModal
-                    visible={
-                        selectionModal ===
-                        "date"
-                    }
-                    title="날짜 선택"
-                    onClose={() =>
-                        setSelectionModal(
-                            null
-                        )
-                    }
-                >
-                    <ScrollView
-                        style={
-                            styles.dateOptionScroll
-                        }
-                        showsVerticalScrollIndicator={
-                            false
-                        }
-                    >
-                        {dateOptions.map(
-                            (
-                                option
-                            ) => {
-                                const selected =
-                                    isSameDay(
-                                        option.value,
-                                        selectedDate
-                                    );
-
-                                return (
-                                    <SelectionOption
-                                        key={
-                                            option.value.toISOString()
-                                        }
-                                        label={
-                                            option.label
-                                        }
-                                        selected={
-                                            selected
-                                        }
-                                        onPress={() => {
-                                            const nextDate =
-                                                new Date(
-                                                    option.value
-                                                );
-
-                                            nextDate.setHours(
-                                                selectedDate.getHours(),
-                                                selectedDate.getMinutes(),
-                                                0,
-                                                0
-                                            );
-
-                                            setSelectedDate(
-                                                nextDate
-                                            );
-
-                                            setSelectionModal(
-                                                null
-                                            );
-                                        }}
-                                    />
-                                );
-                            }
-                        )}
-                    </ScrollView>
-                </SelectionModal>
-
-                {/*
-                 * =====================================================
-                 * 시간 Modal
-                 * =====================================================
-                 */}
-                <SelectionModal
-                    visible={
-                        selectionModal ===
-                        "time"
-                    }
-                    title="시간 선택"
-                    onClose={() =>
-                        setSelectionModal(
-                            null
-                        )
-                    }
-                >
-                    <View
-                        style={
-                            styles.timePicker
-                        }
-                    >
-                        <PickerColumn
-                            values={[
-                                "오전",
-                                "오후",
-                            ]}
-                            selectedValue={
-                                period
-                            }
-                            onSelect={(
-                                value
-                            ) =>
-                                setPeriod(
-                                    value as
-                                        | "오전"
-                                        | "오후"
-                                )
-                            }
-                        />
-
-                        <PickerColumn
-                            values={HOURS.map(
-                                String
-                            )}
-                            selectedValue={String(
-                                hour
-                            )}
-                            onSelect={(
-                                value
-                            ) =>
-                                setHour(
-                                    Number(
-                                        value
-                                    )
-                                )
-                            }
-                        />
-
-                        <PickerColumn
-                            values={MINUTES.map(
-                                (
-                                    value
-                                ) =>
-                                    String(
-                                        value
-                                    ).padStart(
-                                        2,
-                                        "0"
-                                    )
-                            )}
-                            selectedValue={String(
-                                minute
-                            ).padStart(
-                                2,
-                                "0"
-                            )}
-                            onSelect={(
-                                value
-                            ) =>
-                                setMinute(
-                                    Number(
-                                        value
-                                    )
-                                )
-                            }
-                        />
-                    </View>
-
-                    <Pressable
-                        style={
-                            styles.modalConfirmButton
-                        }
-                        onPress={() =>
-                            setSelectionModal(
-                                null
-                            )
-                        }
-                    >
-                        <Text
-                            style={
-                                styles.modalConfirmButtonText
-                            }
-                        >
-                            확인
-                        </Text>
-                    </Pressable>
-                </SelectionModal>
-
-                {/*
-                 * =====================================================
-                 * 알림 Modal
-                 * =====================================================
-                 */}
-                <SelectionModal
-                    visible={
-                        selectionModal ===
-                        "reminder"
-                    }
-                    title="알림 설정"
-                    onClose={() =>
-                        setSelectionModal(
-                            null
-                        )
-                    }
-                >
-                    {REMINDER_OPTIONS.map(
-                        (
-                            option
-                        ) => (
-                            <SelectionOption
-                                key={
-                                    option.value ??
-                                    "none"
-                                }
-                                label={
-                                    option.label
-                                }
-                                selected={
-                                    reminderMinutes ===
-                                    option.value
-                                }
-                                onPress={() => {
-                                    setReminderMinutes(
-                                        option.value
-                                    );
-
-                                    setSelectionModal(
-                                        null
-                                    );
-                                }}
-                            />
-                        )
-                    )}
-                </SelectionModal>
-
-                {/*
-                 * =====================================================
-                 * 반복 Modal
-                 * =====================================================
-                 */}
-                <SelectionModal
-                    visible={
-                        selectionModal ===
-                        "repeat"
-                    }
-                    title="반복 설정"
-                    onClose={() =>
-                        setSelectionModal(
-                            null
-                        )
-                    }
-                >
-                    {REPEAT_OPTIONS.map(
-                        (
-                            option
-                        ) => (
-                            <SelectionOption
-                                key={
-                                    option.value
-                                }
-                                label={
-                                    option.label
-                                }
-                                selected={
-                                    repeatType ===
-                                    option.value
-                                }
-                                onPress={() => {
-                                    setRepeatType(
-                                        option.value
-                                    );
-
-                                    setSelectionModal(
-                                        null
-                                    );
-                                }}
-                            />
-                        )
-                    )}
-                </SelectionModal>
             </View>
         </SafeAreaView>
     );
@@ -1821,189 +1901,54 @@ export default function ScheduleEditScreen() {
 
 /*
  * =====================================================
- * 설정 Row
+ * Section
  * =====================================================
  */
 
-function SettingRow({
-                        icon,
-                        label,
-                        value,
-                        onPress,
-                    }: {
-    icon:
-        keyof typeof Ionicons.glyphMap;
-
-    label:
-        string;
-
-    value:
-        string;
-
-    onPress:
-        () => void;
-}) {
-    return (
-        <Pressable
-            style={
-                styles.settingRow
-            }
-            onPress={
-                onPress
-            }
-        >
-            <View
-                style={
-                    styles.settingLabelArea
-                }
-            >
-                <Ionicons
-                    name={
-                        icon
-                    }
-                    size={21}
-                    color="#666A72"
-                />
-
-                <Text
-                    style={
-                        styles.settingLabel
-                    }
-                >
-                    {
-                        label
-                    }
-                </Text>
-            </View>
-
-            <View
-                style={
-                    styles.settingValueArea
-                }
-            >
-                <Text
-                    style={
-                        styles.settingValue
-                    }
-                >
-                    {
-                        value
-                    }
-                </Text>
-
-                <Ionicons
-                    name="chevron-forward"
-                    size={19}
-                    color="#A4A6AC"
-                />
-            </View>
-        </Pressable>
-    );
-}
-
-/*
- * =====================================================
- * 공통 선택 Modal
- * =====================================================
- */
-
-function SelectionModal({
-                            visible,
-                            title,
-                            onClose,
-                            children,
-                        }: {
-    visible:
-        boolean;
-
+function Section({
+                     title,
+                     children,
+                 }: {
     title:
         string;
 
-    onClose:
-        () => void;
-
     children:
-        React.ReactNode;
+        ReactNode;
 }) {
     return (
-        <Modal
-            visible={
-                visible
-            }
-            transparent
-            animationType="slide"
-            onRequestClose={
-                onClose
+        <View
+            style={
+                styles.section
             }
         >
-            <View
+            <Text
                 style={
-                    styles.modalOverlay
+                    styles.sectionTitle
                 }
             >
-                <Pressable
-                    style={
-                        StyleSheet.absoluteFill
-                    }
-                    onPress={
-                        onClose
-                    }
-                />
+                {
+                    title
+                }
+            </Text>
 
-                <View
-                    style={
-                        styles.modalSheet
-                    }
-                >
-                    <View
-                        style={
-                            styles.modalHeader
-                        }
-                    >
-                        <Text
-                            style={
-                                styles.modalTitle
-                            }
-                        >
-                            {
-                                title
-                            }
-                        </Text>
-
-                        <Pressable
-                            onPress={
-                                onClose
-                            }
-                            hitSlop={10}
-                        >
-                            <Ionicons
-                                name="close"
-                                size={25}
-                                color="#111111"
-                            />
-                        </Pressable>
-                    </View>
-
-                    {
-                        children
-                    }
-                </View>
-            </View>
-        </Modal>
+            {
+                children
+            }
+        </View>
     );
 }
 
 /*
  * =====================================================
- * 선택 Option
+ * Option Button
  * =====================================================
  */
 
-function SelectionOption({
-                             label,
-                             selected,
-                             onPress,
-                         }: {
+function OptionButton({
+                          label,
+                          selected,
+                          onPress,
+                      }: {
     label:
         string;
 
@@ -2015,67 +1960,60 @@ function SelectionOption({
 }) {
     return (
         <Pressable
-            style={
-                styles.selectionOption
-            }
+            style={[
+                styles.optionButton,
+
+                selected &&
+                styles.optionButtonSelected,
+            ]}
             onPress={
                 onPress
             }
         >
             <Text
                 style={[
-                    styles.selectionOptionText,
+                    styles.optionButtonText,
 
                     selected &&
-                    styles.selectionOptionTextSelected,
+                    styles.optionButtonTextSelected,
                 ]}
             >
                 {
                     label
                 }
             </Text>
-
-            <View
-                style={[
-                    styles.radioOuter,
-
-                    selected &&
-                    styles.radioOuterSelected,
-                ]}
-            >
-                {selected && (
-                    <View
-                        style={
-                            styles.radioInner
-                        }
-                    />
-                )}
-            </View>
         </Pressable>
     );
 }
 
 /*
  * =====================================================
- * 시간 Picker Column
+ * Picker Column
  * =====================================================
  */
 
-function PickerColumn({
-                          values,
-                          selectedValue,
-                          onSelect,
-                      }: {
+function PickerColumn<T extends string | number>({
+                                                     values,
+                                                     selectedValue,
+                                                     formatValue,
+                                                     onSelect,
+                                                 }: {
     values:
-        string[];
+        readonly T[];
 
     selectedValue:
-        string;
+        T;
+
+    formatValue:
+        (
+            value:
+            T
+        ) => string;
 
     onSelect:
         (
             value:
-            string
+            T
         ) => void;
 }) {
     return (
@@ -2089,19 +2027,22 @@ function PickerColumn({
             showsVerticalScrollIndicator={
                 false
             }
+            nestedScrollEnabled
         >
             {values.map(
                 (
                     value
                 ) => {
                     const selected =
-                        selectedValue ===
-                        value;
+                        value ===
+                        selectedValue;
 
                     return (
                         <Pressable
                             key={
-                                value
+                                String(
+                                    value
+                                )
                             }
                             style={[
                                 styles.pickerItem,
@@ -2124,7 +2065,9 @@ function PickerColumn({
                                 ]}
                             >
                                 {
-                                    value
+                                    formatValue(
+                                        value
+                                    )
                                 }
                             </Text>
                         </Pressable>
@@ -2167,21 +2110,34 @@ const styles =
                 "#F0F0F1",
         },
 
-        headerIconButton: {
-            width: 36,
-            height: 36,
-            alignItems: "flex-start",
-            justifyContent: "center",
-        },
-
         headerTitle: {
             fontSize: 18,
             fontWeight: "700",
             color: "#111111",
         },
 
-        headerSpacer: {
-            width: 36,
+        headerRightSpace: {
+            width: 28,
+        },
+
+        scopeBanner: {
+            marginHorizontal: 20,
+            marginTop: 14,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            borderRadius: 10,
+            backgroundColor:
+                "#FFF4F4",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+        },
+
+        scopeBannerText: {
+            flex: 1,
+            fontSize: 13,
+            lineHeight: 19,
+            color: "#8A5559",
         },
 
         scrollView: {
@@ -2189,253 +2145,100 @@ const styles =
         },
 
         scrollContent: {
-            paddingHorizontal: 24,
-            paddingTop: 28,
-            paddingBottom: 40,
+            paddingHorizontal: 20,
+            paddingTop: 24,
+            paddingBottom: 36,
         },
 
-        fieldGroup: {
+        section: {
+            marginBottom: 32,
+        },
+
+        sectionTitle: {
             marginBottom: 12,
-        },
-
-        fieldLabel: {
-            marginBottom: 10,
-            fontSize: 14,
-            fontWeight: "600",
-            color: "#55585F",
-        },
-
-        titleInput: {
-            minHeight: 54,
-            paddingHorizontal: 16,
-            borderWidth: 1,
-            borderColor:
-                "#E3E4E7",
-            borderRadius: 10,
             fontSize: 16,
-            color: "#111111",
-            backgroundColor:
-                "#FFFFFF",
-        },
-
-        settingRow: {
-            minHeight: 64,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent:
-                "space-between",
-            borderBottomWidth: 1,
-            borderBottomColor:
-                "#EFEFF1",
-        },
-
-        settingLabelArea: {
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-        },
-
-        settingLabel: {
-            fontSize: 15,
-            fontWeight: "500",
-            color: "#333333",
-        },
-
-        settingValueArea: {
-            flex: 1,
-            marginLeft: 20,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent:
-                "flex-end",
-            gap: 5,
-        },
-
-        settingValue: {
-            flexShrink: 1,
-            fontSize: 14,
-            color: "#777B84",
-            textAlign: "right",
-        },
-
-        weekdayInfo: {
-            marginTop: 14,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            borderRadius: 10,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            backgroundColor:
-                "#FFF3F3",
-        },
-
-        weekdayInfoText: {
-            flex: 1,
-            fontSize: 13,
-            lineHeight: 19,
-            color: "#A86568",
-        },
-
-        memoGroup: {
-            marginTop: 30,
-        },
-
-        memoInputContainer: {
-            minHeight: 150,
-            paddingHorizontal: 16,
-            paddingTop: 14,
-            paddingBottom: 12,
-            borderWidth: 1,
-            borderColor:
-                "#E3E4E7",
-            borderRadius: 10,
-        },
-
-        memoInput: {
-            minHeight: 100,
-            padding: 0,
-            fontSize: 15,
-            lineHeight: 22,
-            color: "#111111",
-        },
-
-        memoCount: {
-            marginTop: 8,
-            fontSize: 12,
-            color: "#A4A6AC",
-            textAlign: "right",
-        },
-
-        bottomArea: {
-            paddingHorizontal: 24,
-            paddingTop: 12,
-            paddingBottom: 14,
-            borderTopWidth: 1,
-            borderTopColor:
-                "#F0F0F1",
-            backgroundColor:
-                "#FFFFFF",
-        },
-
-        saveButton: {
-            height: 56,
-            borderRadius: 6,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor:
-                "#111111",
-        },
-
-        saveButtonDisabled: {
-            opacity: 0.6,
-        },
-
-        saveButtonText: {
-            fontSize: 16,
-            fontWeight: "600",
-            color: "#FFFFFF",
-        },
-
-        modalOverlay: {
-            flex: 1,
-            justifyContent:
-                "flex-end",
-            backgroundColor:
-                "rgba(0, 0, 0, 0.35)",
-        },
-
-        modalSheet: {
-            maxHeight: "74%",
-            paddingHorizontal: 24,
-            paddingTop: 20,
-            paddingBottom: 30,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            backgroundColor:
-                "#FFFFFF",
-        },
-
-        modalHeader: {
-            marginBottom: 16,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent:
-                "space-between",
-        },
-
-        modalTitle: {
-            fontSize: 19,
             fontWeight: "700",
             color: "#111111",
         },
 
-        selectionOption: {
-            minHeight: 56,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent:
-                "space-between",
-            borderBottomWidth: 1,
-            borderBottomColor:
-                "#F0F0F1",
-        },
-
-        selectionOptionText: {
-            fontSize: 16,
-            color: "#44474D",
-        },
-
-        selectionOptionTextSelected: {
-            fontWeight: "600",
-            color: "#111111",
-        },
-
-        radioOuter: {
-            width: 22,
-            height: 22,
-            borderWidth: 2,
+        titleInput: {
+            height: 54,
+            paddingHorizontal: 16,
+            borderWidth: 1,
             borderColor:
-                "#C6C8CD",
-            borderRadius: 11,
+                "#E2E3E6",
+            borderRadius: 10,
+            fontSize: 16,
+            color: "#111111",
+            backgroundColor:
+                "#FFFFFF",
+        },
+
+        horizontalOptions: {
+            gap: 10,
+            paddingRight: 20,
+        },
+
+        optionWrap: {
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 10,
+        },
+
+        optionButton: {
+            minHeight: 44,
+            paddingHorizontal: 16,
+            borderRadius: 22,
+            borderWidth: 1,
+            borderColor:
+                "#E0E1E5",
             alignItems: "center",
             justifyContent: "center",
+            backgroundColor:
+                "#FFFFFF",
         },
 
-        radioOuterSelected: {
+        optionButtonSelected: {
             borderColor:
                 "#111111",
-        },
-
-        radioInner: {
-            width: 10,
-            height: 10,
-            borderRadius: 5,
             backgroundColor:
                 "#111111",
         },
 
-        dateOptionScroll: {
-            maxHeight: 430,
+        optionButtonText: {
+            fontSize: 14,
+            color: "#555860",
         },
 
-        timePicker: {
-            height: 280,
+        optionButtonTextSelected: {
+            fontWeight: "600",
+            color: "#FFFFFF",
+        },
+
+        timePickerRow: {
+            height: 210,
             flexDirection: "row",
             gap: 10,
         },
 
         pickerColumn: {
             flex: 1,
+            borderWidth: 1,
+            borderColor:
+                "#E2E3E6",
+            borderRadius: 12,
+            backgroundColor:
+                "#FAFAFB",
         },
 
         pickerColumnContent: {
-            paddingVertical: 4,
+            paddingVertical: 8,
         },
 
         pickerItem: {
-            minHeight: 48,
-            marginVertical: 3,
+            height: 44,
+            marginHorizontal: 6,
+            marginVertical: 2,
             borderRadius: 8,
             alignItems: "center",
             justifyContent: "center",
@@ -2443,32 +2246,91 @@ const styles =
 
         pickerItemSelected: {
             backgroundColor:
-                "#F3F3F4",
+                "#111111",
         },
 
         pickerItemText: {
-            fontSize: 16,
-            color: "#777B84",
+            fontSize: 15,
+            color: "#666A72",
         },
 
         pickerItemTextSelected: {
             fontWeight: "700",
-            color: "#111111",
+            color: "#FFFFFF",
         },
 
-        modalConfirmButton: {
-            height: 52,
-            marginTop: 18,
-            borderRadius: 6,
+        weekdayInfo: {
+            marginTop: 12,
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
+            gap: 6,
+        },
+
+        weekdayInfoText: {
+            fontSize: 13,
+            color: "#D67C83",
+        },
+
+        memoInput: {
+            minHeight: 130,
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            borderWidth: 1,
+            borderColor:
+                "#E2E3E6",
+            borderRadius: 10,
+            fontSize: 15,
+            lineHeight: 22,
+            color: "#111111",
+            backgroundColor:
+                "#FFFFFF",
+        },
+
+        memoCount: {
+            marginTop: 8,
+            textAlign: "right",
+            fontSize: 12,
+            color: "#999CA3",
+        },
+
+        bottomArea: {
+            paddingHorizontal: 20,
+            paddingTop: 12,
+            paddingBottom: 14,
+            borderTopWidth: 1,
+            borderTopColor:
+                "#EEEEF0",
+            backgroundColor:
+                "#FFFFFF",
+        },
+
+        saveButton: {
+            height: 56,
+            borderRadius: 8,
             backgroundColor:
                 "#111111",
+            alignItems: "center",
+            justifyContent: "center",
         },
 
-        modalConfirmButtonText: {
-            fontSize: 16,
-            fontWeight: "600",
+        saveButtonDisabled: {
+            opacity: 0.45,
+        },
+
+        saveButtonText: {
+            fontSize: 17,
+            fontWeight: "700",
             color: "#FFFFFF",
+        },
+
+        loadingArea: {
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+
+        loadingText: {
+            fontSize: 15,
+            color: "#777B84",
         },
     });
