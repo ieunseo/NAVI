@@ -984,6 +984,203 @@ export default function HomeScreen() {
 
     /*
      * =====================================================
+     * 반복 일정 해제
+     *
+     * 선택한 일정 자체는 유지합니다.
+     *
+     * 선택한 일정:
+     * → repeatType = "none"
+     * → seriesId = null
+     * → 기존 알림 유지
+     *
+     * 같은 seriesId의 선택 일정 이후 일정:
+     * → Storage에서 삭제
+     * → 예약된 Local Notification 취소
+     *
+     * 선택 일정 이전의 일정:
+     * → 기존 기록 유지
+     * =====================================================
+     */
+
+    const handleRemoveRepeat =
+        async (
+            schedule:
+            LocalSchedule
+        ) => {
+            if (
+                schedule.repeatType ===
+                "none" ||
+                !schedule.seriesId
+            ) {
+                return;
+            }
+
+            const targetSeriesId =
+                schedule.seriesId;
+
+            const targetTime =
+                new Date(
+                    schedule.scheduledAt
+                ).getTime();
+
+            const futureSchedules =
+                schedules.filter(
+                    (
+                        item
+                    ) =>
+                        item.seriesId ===
+                        targetSeriesId &&
+                        item.id !==
+                        schedule.id &&
+                        new Date(
+                            item.scheduledAt
+                        ).getTime() >
+                        targetTime
+                );
+
+            const updatedCurrentSchedule:
+                LocalSchedule = {
+                ...schedule,
+
+                repeatType:
+                    "none",
+
+                seriesId:
+                    null,
+            };
+
+            /*
+             * 먼저 Storage에 저장할 최종 상태를 만듭니다.
+             *
+             * 현재 일정:
+             * → 일반 일정으로 변경
+             *
+             * 이후 반복 일정:
+             * → 제거
+             */
+            const nextSchedules =
+                schedules
+                    .filter(
+                        (
+                            item
+                        ) =>
+                            !(
+                                item.seriesId ===
+                                targetSeriesId &&
+                                item.id !==
+                                schedule.id &&
+                                new Date(
+                                    item.scheduledAt
+                                ).getTime() >
+                                targetTime
+                            )
+                    )
+                    .map(
+                        (
+                            item
+                        ) =>
+                            item.id ===
+                            schedule.id
+                                ? updatedCurrentSchedule
+                                : item
+                    );
+
+            try {
+                /*
+                 * Storage 저장을 먼저 완료합니다.
+                 *
+                 * 저장 실패 시 반복 일정 데이터가
+                 * 변경되지 않도록 합니다.
+                 */
+                await saveSchedules(
+                    nextSchedules
+                );
+
+                /*
+                 * Storage 저장 성공 후
+                 * 삭제된 미래 일정들의 예약 알림을 취소합니다.
+                 */
+                for (
+                    const futureSchedule
+                    of futureSchedules
+                    ) {
+                    if (
+                        !futureSchedule.localNotificationId
+                    ) {
+                        continue;
+                    }
+
+                    try {
+                        await cancelScheduledNotificationAsync(
+                            futureSchedule.localNotificationId
+                        );
+
+                        console.log(
+                            "반복 해제 미래 알림 취소 완료:",
+                            {
+                                scheduleId:
+                                futureSchedule.id,
+
+                                notificationId:
+                                futureSchedule.localNotificationId,
+                            }
+                        );
+                    } catch (
+                        notificationError
+                        ) {
+                        console.error(
+                            "반복 해제 미래 알림 취소 오류:",
+                            notificationError
+                        );
+                    }
+                }
+
+                setSelectedSchedule(
+                    updatedCurrentSchedule
+                );
+
+                setScheduleInfoVisible(
+                    false
+                );
+
+                console.log(
+                    "반복 일정 해제 완료:",
+                    {
+                        scheduleId:
+                        schedule.id,
+
+                        seriesId:
+                        targetSeriesId,
+
+                        removedFutureCount:
+                        futureSchedules.length,
+                    }
+                );
+
+                Alert.alert(
+                    "반복을 해제했어요",
+                    futureSchedules.length >
+                    0
+                        ? "현재 일정은 유지하고 이후 반복 일정은 삭제했어요."
+                        : "현재 일정은 유지하고 반복 설정을 해제했어요."
+                );
+            } catch (
+                error
+                ) {
+                console.error(
+                    "반복 일정 해제 오류:",
+                    error
+                );
+
+                Alert.alert(
+                    "반복을 해제하지 못했어요",
+                    "잠시 후 다시 시도해 주세요."
+                );
+            }
+        };
+
+    /*
+     * =====================================================
      * 왼쪽 Swipe
      *
      * pending   → completed
@@ -1695,6 +1892,13 @@ export default function HomeScreen() {
                 onEdit={
                     handleEditSchedule
                 }
+                onRemoveRepeat={(
+                    schedule
+                ) => {
+                    void handleRemoveRepeat(
+                        schedule
+                    );
+                }}
                 onDelete={(
                     schedule
                 ) => {

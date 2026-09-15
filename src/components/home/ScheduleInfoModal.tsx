@@ -24,6 +24,13 @@ type ScheduleStatus =
 type ScheduleInfo = {
     id: string;
 
+    /*
+     * 반복 일정 그룹 ID
+     *
+     * 반복 일정 해제 여부 판단에 사용합니다.
+     */
+    seriesId?: string | null;
+
     title: string;
 
     memo?: string | null;
@@ -60,6 +67,17 @@ type ScheduleInfoModalProps = {
         () => void;
 
     onEdit:
+        (
+            schedule: ScheduleInfo
+        ) => void;
+
+    /*
+     * 반복 일정 해제
+     *
+     * 일정 자체는 유지하고
+     * 반복 설정만 제거합니다.
+     */
+    onRemoveRepeat:
         (
             schedule: ScheduleInfo
         ) => void;
@@ -254,6 +272,7 @@ export function ScheduleInfoModal({
                                       schedule,
                                       onClose,
                                       onEdit,
+                                      onRemoveRepeat,
                                       onDelete,
                                   }: ScheduleInfoModalProps) {
     if (
@@ -261,6 +280,69 @@ export function ScheduleInfoModal({
     ) {
         return null;
     }
+
+    /*
+     * repeatType과 seriesId가 모두 존재해야
+     * 실제 반복 일정으로 판단합니다.
+     */
+    const isRepeatSchedule =
+        schedule.repeatType !==
+        undefined &&
+        schedule.repeatType !==
+        "none" &&
+        Boolean(
+            schedule.seriesId
+        );
+
+    /*
+     * =====================================================
+     * 반복 해제
+     * =====================================================
+     */
+
+    const handleRemoveRepeatPress =
+        () => {
+            if (
+                !isRepeatSchedule
+            ) {
+                return;
+            }
+
+            Alert.alert(
+                "반복을 해제할까요?",
+                "현재 일정은 그대로 유지하고 이후 반복 일정은 삭제돼요.",
+                [
+                    {
+                        text:
+                            "취소",
+
+                        style:
+                            "cancel",
+                    },
+
+                    {
+                        text:
+                            "반복 해제",
+
+                        style:
+                            "destructive",
+
+                        onPress:
+                            () => {
+                                onRemoveRepeat(
+                                    schedule
+                                );
+                            },
+                    },
+                ]
+            );
+        };
+
+    /*
+     * =====================================================
+     * 일정 삭제
+     * =====================================================
+     */
 
     const handleDeletePress =
         () => {
@@ -355,9 +437,6 @@ export function ScheduleInfoModal({
                         >
                             {/*
                              * 일정 수정
-                             *
-                             * 실제 수정 화면은
-                             * 별도 Issue에서 구현합니다.
                              */}
                             <Pressable
                                 style={
@@ -565,6 +644,37 @@ export function ScheduleInfoModal({
                                 확인
                             </Text>
                         </Pressable>
+
+                        {/*
+                         * 반복 일정에서만 노출합니다.
+                         *
+                         * 일반 일정에는
+                         * 반복 해제 버튼이 나타나지 않습니다.
+                         */}
+                        {isRepeatSchedule && (
+                            <Pressable
+                                style={
+                                    styles.removeRepeatButton
+                                }
+                                onPress={
+                                    handleRemoveRepeatPress
+                                }
+                            >
+                                <Ionicons
+                                    name="repeat-outline"
+                                    size={18}
+                                    color="#777B84"
+                                />
+
+                                <Text
+                                    style={
+                                        styles.removeRepeatButtonText
+                                    }
+                                >
+                                    반복 해제
+                                </Text>
+                            </Pressable>
+                        )}
 
                         <Pressable
                             style={
@@ -854,6 +964,29 @@ const styles =
             fontSize: 16,
             fontWeight: "600",
             color: "#FFFFFF",
+        },
+
+        /*
+         * 반복 일정에서만 노출되는 버튼입니다.
+         *
+         * 삭제와 의미가 다르기 때문에
+         * 빨간색 destructive 스타일을 사용하지 않습니다.
+         */
+        removeRepeatButton: {
+            height: 48,
+            borderRadius: 6,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            backgroundColor:
+                "#F7F7F8",
+        },
+
+        removeRepeatButtonText: {
+            fontSize: 15,
+            fontWeight: "600",
+            color: "#55585F",
         },
 
         deleteButton: {
