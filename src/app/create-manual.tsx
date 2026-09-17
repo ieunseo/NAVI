@@ -90,6 +90,18 @@ type RepeatType =
 type LocalSchedule = {
     id: string;
 
+    /*
+     * 같은 반복 일정 그룹을 식별하는 ID입니다.
+     *
+     * 반복 없음:
+     * null
+     *
+     * 반복 일정:
+     * 같은 반복 묶음끼리 동일한 seriesId 사용
+     */
+    seriesId:
+        string | null;
+
     title: string;
 
     memo: string | null;
@@ -497,6 +509,175 @@ function createLocalScheduleId() {
 
 /*
  * =====================================================
+ * 반복 일정 Series ID
+ * =====================================================
+ */
+
+function createLocalSeriesId() {
+    return `series-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(
+            2,
+            9
+        )}`;
+}
+
+
+/*
+ * =====================================================
+ * 반복 일정 생성 범위
+ * =====================================================
+ *
+ * MVP에서는 반복 일정을 무한히 생성하지 않고
+ * 시작일을 포함하여 향후 90일 범위의 회차를
+ * 미리 생성합니다.
+ *
+ * none
+ * → 선택한 일정 1건만 생성
+ *
+ * daily
+ * → 매일 생성
+ *
+ * weekday
+ * → 월 ~ 금만 생성
+ *
+ * weekly
+ * → 시작일과 동일한 요일로 매주 생성
+ *
+ * 추후 서버 동기화 / 백그라운드 생성 구조로 전환하면
+ * 이 정책은 변경할 수 있습니다.
+ * =====================================================
+ */
+
+const REPEAT_GENERATION_DAYS =
+    90;
+
+
+/*
+ * 시작 일정의 날짜 / 시간을 기준으로
+ * 실제 저장할 반복 회차 Date 배열을 생성합니다.
+ */
+function createRepeatDates(
+    startDate: Date,
+    repeatType: RepeatType
+) {
+    if (
+        repeatType ===
+        "none"
+    ) {
+        return [
+            new Date(
+                startDate
+            ),
+        ];
+    }
+
+
+    const dates:
+        Date[] =
+        [];
+
+
+    const endDate =
+        new Date(
+            startDate
+        );
+
+
+    endDate.setDate(
+        endDate.getDate() +
+        REPEAT_GENERATION_DAYS
+    );
+
+
+    /*
+     * 매일 / 평일 반복은
+     * 하루씩 이동하면서 조건에 맞는 날짜를 추가합니다.
+     */
+    if (
+        repeatType ===
+        "daily" ||
+        repeatType ===
+        "weekday"
+    ) {
+        const currentDate =
+            new Date(
+                startDate
+            );
+
+
+        while (
+            currentDate.getTime() <=
+            endDate.getTime()
+            ) {
+            const day =
+                currentDate.getDay();
+
+
+            const shouldAdd =
+                repeatType ===
+                "daily"
+                    ? true
+                    : day !== 0 &&
+                    day !== 6;
+
+
+            if (
+                shouldAdd
+            ) {
+                dates.push(
+                    new Date(
+                        currentDate
+                    )
+                );
+            }
+
+
+            currentDate.setDate(
+                currentDate.getDate() +
+                1
+            );
+        }
+
+
+        return dates;
+    }
+
+
+    /*
+     * 매주 반복은 시작일과 동일한 요일이므로
+     * 7일씩 이동하면서 생성합니다.
+     */
+    const currentDate =
+        new Date(
+            startDate
+        );
+
+
+    while (
+        currentDate.getTime() <=
+        endDate.getTime()
+        ) {
+        dates.push(
+            new Date(
+                currentDate
+            )
+        );
+
+
+        currentDate.setDate(
+            currentDate.getDate() +
+            7
+        );
+    }
+
+
+    return dates;
+}
+
+
+/*
+ * =====================================================
  * Local Notification
  * =====================================================
  */
@@ -525,10 +706,11 @@ async function ensureNotificationPermission() {
 
 /*
  * 일정 Local Notification을
- * 딱 1회만 예약합니다.
+ * 회차별로 딱 1회 예약합니다.
  *
- * 반복 일정의 다음 알림 예약은
- * 이후 별도 Task에서 구현합니다.
+ * 반복 일정은 각 회차마다
+ * 서로 다른 scheduleId와
+ * localNotificationId를 사용합니다.
  */
 async function scheduleLocalNotification(
     scheduleId: string,
@@ -911,11 +1093,10 @@ export default function CreateManualScreen() {
                     ) {
                         /*
                          * 기존에 저장된 일정에는
-                         * repeatType이 없을 수 있습니다.
+                         * repeatType / seriesId가 없을 수 있습니다.
                          *
                          * 기존 데이터는 삭제하지 않고
-                         * repeatType이 없는 경우
-                         * 반복 없음으로 보정합니다.
+                         * 누락된 값을 보정합니다.
                          */
                         schedules =
                             parsed.map(
@@ -923,6 +1104,10 @@ export default function CreateManualScreen() {
                                     schedule
                                 ) => ({
                                     ...schedule,
+
+                                    seriesId:
+                                        schedule.seriesId ??
+                                        null,
 
                                     repeatType:
                                         schedule.repeatType ??
@@ -933,86 +1118,181 @@ export default function CreateManualScreen() {
                 }
 
 
-                const scheduleId =
-                    createLocalScheduleId();
+                /*
+                 * =================================================
+                 * 반복 일정 Series ID
+                 *
+                 * 반복 없음
+                 * → seriesId = null
+                 *
+                 * 반복 일정
+                 * → 생성되는 모든 회차가 같은 seriesId 사용
+                 * =================================================
+                 */
+                const seriesId =
+                    repeatType ===
+                    "none"
+                        ? null
+                        : createLocalSeriesId();
 
 
-                let localNotificationId:
-                    string | null =
-                    null;
+                /*
+                 * =================================================
+                 * 실제 생성할 회차 날짜 계산
+                 *
+                 * none
+                 * → 1건
+                 *
+                 * daily / weekday / weekly
+                 * → 시작일 포함 향후 90일 범위
+                 * =================================================
+                 */
+                const repeatDates =
+                    createRepeatDates(
+                        scheduledDate,
+                        repeatType
+                    );
 
 
-                if (
-                    reminderMinutes !==
-                    null
-                ) {
-                    try {
-                        localNotificationId =
-                            await scheduleLocalNotification(
-                                scheduleId,
+                const newSchedules:
+                    LocalSchedule[] =
+                    [];
 
-                                title.trim(),
 
-                                scheduledDate,
+                let notificationFailureCount =
+                    0;
 
-                                reminderMinutes
-                            );
-                    } catch (
-                        notificationError
-                        ) {
-                        console.error(
-                            "로컬 알림 예약 오류:",
+
+                /*
+                 * =================================================
+                 * 반복 일정 회차별 생성
+                 *
+                 * 각 회차는:
+                 *
+                 * → 서로 다른 scheduleId
+                 * → 동일한 seriesId
+                 * → 서로 다른 localNotificationId
+                 *
+                 * 를 사용합니다.
+                 * =================================================
+                 */
+                for (
+                    const repeatDate
+                    of repeatDates
+                    ) {
+                    const scheduleId =
+                        createLocalScheduleId();
+
+
+                    let localNotificationId:
+                        string | null =
+                        null;
+
+
+                    if (
+                        reminderMinutes !==
+                        null
+                    ) {
+                        try {
+                            localNotificationId =
+                                await scheduleLocalNotification(
+                                    scheduleId,
+
+                                    title.trim(),
+
+                                    repeatDate,
+
+                                    reminderMinutes
+                                );
+                        } catch (
                             notificationError
-                        );
+                            ) {
+                            /*
+                             * 특정 회차의 알림 예약에 실패해도
+                             * 전체 일정 저장은 계속 진행합니다.
+                             *
+                             * 예:
+                             * 첫 회차의 알림 시간이 이미 지난 경우
+                             * 이후 회차 알림은 정상 예약할 수 있습니다.
+                             */
+                            notificationFailureCount +=
+                                1;
 
 
-                        Alert.alert(
-                            "알림은 예약하지 못했어요",
-                            "일정은 정상적으로 저장합니다."
-                        );
+                            console.error(
+                                "반복 일정 회차 알림 예약 오류:",
+                                {
+                                    scheduleId,
+
+                                    scheduledAt:
+                                        repeatDate.toISOString(),
+
+                                    notificationError,
+                                }
+                            );
+                        }
                     }
+
+
+                    const newSchedule:
+                        LocalSchedule = {
+                        id:
+                        scheduleId,
+
+                        /*
+                         * 반복 없음은 null,
+                         * 반복 일정은 모든 회차가 같은 seriesId를 사용합니다.
+                         */
+                        seriesId,
+
+                        title:
+                            title.trim(),
+
+                        memo:
+                            memo.trim() ||
+                            null,
+
+                        scheduledAt:
+                            repeatDate.toISOString(),
+
+                        /*
+                         * 반복 설정 저장
+                         */
+                        repeatType,
+
+                        status:
+                            "pending",
+
+                        completed:
+                            false,
+
+                        reminderMinutes,
+
+                        localNotificationId,
+                    };
+
+
+                    newSchedules.push(
+                        newSchedule
+                    );
                 }
 
 
-                const newSchedule:
-                    LocalSchedule = {
-                    id:
-                    scheduleId,
-
-                    title:
-                        title.trim(),
-
-                    memo:
-                        memo.trim() ||
-                        null,
-
-                    scheduledAt:
-                        scheduledDate.toISOString(),
-
-                    /*
-                     * 반복 설정 저장
-                     */
-                    repeatType,
-
-                    status:
-                        "pending",
-
-                    completed:
-                        false,
-
-                    reminderMinutes,
-
-                    localNotificationId,
-                };
-
-
+                /*
+                 * =================================================
+                 * Storage 저장
+                 *
+                 * 기존 일정 뒤에
+                 * 이번에 생성한 모든 반복 회차를 추가합니다.
+                 * =================================================
+                 */
                 await AsyncStorage.setItem(
                     storageKey,
 
                     JSON.stringify(
                         [
                             ...schedules,
-                            newSchedule,
+                            ...newSchedules,
                         ]
                     )
                 );
@@ -1020,8 +1300,35 @@ export default function CreateManualScreen() {
 
                 console.log(
                     "로컬 일정 저장 완료:",
-                    newSchedule
+                    {
+                        repeatType,
+
+                        seriesId,
+
+                        createdCount:
+                        newSchedules.length,
+
+                        notificationFailureCount,
+
+                        schedules:
+                        newSchedules,
+                    }
                 );
+
+
+                /*
+                 * 일부 알림 예약이 실패해도
+                 * 일정 자체는 정상 저장합니다.
+                 */
+                if (
+                    notificationFailureCount >
+                    0
+                ) {
+                    Alert.alert(
+                        "일정은 저장했어요",
+                        `${notificationFailureCount}개 회차의 알림은 예약하지 못했어요.`
+                    );
+                }
 
 
                 router.replace(

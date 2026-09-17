@@ -27,6 +27,14 @@ import {
     cancelScheduledNotificationAsync,
 } from "expo-notifications/build/cancelScheduledNotificationAsync";
 
+import {
+    scheduleNotificationAsync,
+} from "expo-notifications/build/scheduleNotificationAsync";
+
+import {
+    SchedulableTriggerInputTypes,
+} from "expo-notifications/build/Notifications.types";
+
 import { Colors } from "@/constants/colors";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 
@@ -652,6 +660,130 @@ export default function HomeScreen() {
 
     /*
      * =====================================================
+     * 일정 로컬 알림 예약
+     *
+     * reminderMinutes가 없거나
+     * 알림 예정 시간이 이미 지난 경우 예약하지 않습니다.
+     *
+     * 반복 일정이어도 전달받은 현재 일정 1건만 예약합니다.
+     * seriesId 기준으로 다른 회차를 건드리지 않습니다.
+     * =====================================================
+     */
+
+    const createScheduleNotification =
+        async (
+            schedule:
+            LocalSchedule
+        ): Promise<
+            string | null
+        > => {
+            if (
+                schedule.reminderMinutes ==
+                null
+            ) {
+                return null;
+            }
+
+            const scheduledDate =
+                new Date(
+                    schedule.scheduledAt
+                );
+
+            const notificationDate =
+                new Date(
+                    scheduledDate.getTime() -
+                    schedule.reminderMinutes *
+                    60 *
+                    1000
+                );
+
+            /*
+             * 알림 예정 시간이 이미 지났으면
+             * 다시 대기로 변경하더라도 재예약하지 않습니다.
+             */
+            if (
+                notificationDate.getTime() <=
+                Date.now()
+            ) {
+                console.log(
+                    "알림 재예약 불가 - 알림 시간이 이미 지남:",
+                    {
+                        scheduleId:
+                        schedule.id,
+
+                        notificationDate:
+                            notificationDate.toISOString(),
+                    }
+                );
+
+                return null;
+            }
+
+            try {
+                const notificationId =
+                    await scheduleNotificationAsync(
+                        {
+                            content: {
+                                title:
+                                    "일정이 곧 시작돼요",
+
+                                body:
+                                schedule.title,
+
+                                sound:
+                                    "default",
+
+                                /*
+                                 * 추후 알림 클릭 → 일정 상세 이동 구현 시
+                                 * scheduleId를 이용할 수 있습니다.
+                                 */
+                                data: {
+                                    scheduleId:
+                                    schedule.id,
+                                },
+                            },
+
+                            trigger: {
+                                type:
+                                SchedulableTriggerInputTypes.DATE,
+
+                                date:
+                                notificationDate,
+                            },
+                        }
+                    );
+
+                console.log(
+                    "일정 알림 재예약 완료:",
+                    {
+                        scheduleId:
+                        schedule.id,
+
+                        seriesId:
+                        schedule.seriesId,
+
+                        notificationId,
+
+                        notificationDate:
+                            notificationDate.toISOString(),
+                    }
+                );
+
+                return notificationId;
+            } catch (
+                error
+                ) {
+                console.error(
+                    "일정 알림 재예약 오류:",
+                    error
+                );
+
+                return null;
+            }
+        };
+
+    /*
+     * =====================================================
      * 일정 로드
      * =====================================================
      */
@@ -1186,6 +1318,18 @@ export default function HomeScreen() {
      * pending   → completed
      * completed → pending
      * failed    → pending
+     *
+     * 알림 정책
+     *
+     * pending → completed
+     * → 해당 회차의 예약 알림만 취소
+     *
+     * completed / failed → pending
+     * → 해당 회차의 알림 예정 시간이 미래라면 재예약
+     *
+     * 반복 일정인 경우에도
+     * 현재 schedule.id에 해당하는 일정만 처리합니다.
+     * 같은 seriesId의 다른 회차 알림은 유지합니다.
      * =====================================================
      */
 
@@ -1208,33 +1352,121 @@ export default function HomeScreen() {
                     "pending";
             }
 
-            const nextCompleted =
-                nextStatus ===
-                "completed";
-
-            const updatedSchedule:
-                LocalSchedule = {
-                ...schedule,
-
-                status:
-                nextStatus,
-
-                completed:
-                nextCompleted,
-            };
-
-            const nextSchedules =
-                schedules.map(
-                    (
-                        item
-                    ) =>
-                        item.id ===
-                        schedule.id
-                            ? updatedSchedule
-                            : item
-                );
+            let nextNotificationId:
+                string | null =
+                schedule.localNotificationId ??
+                null;
 
             try {
+                /*
+                 * =================================================
+                 * pending → completed
+                 *
+                 * 현재 회차에 예약된 알림만 취소합니다.
+                 *
+                 * seriesId 기준으로 취소하지 않으므로
+                 * 다음 반복 일정의 알림은 그대로 유지됩니다.
+                 * =================================================
+                 */
+                if (
+                    nextStatus ===
+                    "completed"
+                ) {
+                    if (
+                        schedule.localNotificationId
+                    ) {
+                        try {
+                            await cancelScheduledNotificationAsync(
+                                schedule.localNotificationId
+                            );
+
+                            console.log(
+                                "완료 일정 알림 취소 완료:",
+                                {
+                                    scheduleId:
+                                    schedule.id,
+
+                                    seriesId:
+                                    schedule.seriesId,
+
+                                    notificationId:
+                                    schedule.localNotificationId,
+                                }
+                            );
+                        } catch (
+                            notificationError
+                            ) {
+                            console.error(
+                                "완료 일정 알림 취소 오류:",
+                                notificationError
+                            );
+                        }
+                    }
+
+                    /*
+                     * 현재 회차의 알림을 취소했으므로
+                     * Storage에 저장된 notificationId도 제거합니다.
+                     */
+                    nextNotificationId =
+                        null;
+                }
+
+                /*
+                 * =================================================
+                 * completed / failed → pending
+                 *
+                 * 해당 회차의 알림 예정 시간이
+                 * 현재보다 미래인 경우에만 다시 예약합니다.
+                 *
+                 * reminderMinutes가 null이거나
+                 * 알림 시간이 이미 지났다면 null을 반환합니다.
+                 * =================================================
+                 */
+                if (
+                    nextStatus ===
+                    "pending"
+                ) {
+                    nextNotificationId =
+                        await createScheduleNotification(
+                            schedule
+                        );
+                }
+
+                const nextCompleted =
+                    nextStatus ===
+                    "completed";
+
+                const updatedSchedule:
+                    LocalSchedule = {
+                    ...schedule,
+
+                    status:
+                    nextStatus,
+
+                    completed:
+                    nextCompleted,
+
+                    localNotificationId:
+                    nextNotificationId,
+                };
+
+                /*
+                 * schedule.id 기준으로
+                 * 현재 일정 1건만 변경합니다.
+                 *
+                 * 반복 일정의 seriesId는 사용하지 않습니다.
+                 */
+                const nextSchedules =
+                    schedules.map(
+                        (
+                            item
+                        ) =>
+                            item.id ===
+                            schedule.id
+                                ? updatedSchedule
+                                : item
+                    );
+
                 await saveSchedules(
                     nextSchedules
                 );
@@ -1254,10 +1486,16 @@ export default function HomeScreen() {
                         scheduleId:
                         schedule.id,
 
+                        seriesId:
+                        schedule.seriesId,
+
                         previousStatus:
                         schedule.status,
 
                         nextStatus,
+
+                        localNotificationId:
+                        nextNotificationId,
                     }
                 );
             } catch (
@@ -1282,6 +1520,14 @@ export default function HomeScreen() {
      * pending   → failed
      * completed → failed
      * failed    → 변화 없음
+     *
+     * 알림 정책
+     *
+     * 실패 처리 시
+     * 해당 회차의 예약 알림만 취소합니다.
+     *
+     * 반복 일정이어도 같은 seriesId의
+     * 다음 회차 알림은 그대로 유지합니다.
      * =====================================================
      */
 
@@ -1297,29 +1543,80 @@ export default function HomeScreen() {
                 return;
             }
 
-            const updatedSchedule:
-                LocalSchedule = {
-                ...schedule,
-
-                status:
-                    "failed",
-
-                completed:
-                    false,
-            };
-
-            const nextSchedules =
-                schedules.map(
-                    (
-                        item
-                    ) =>
-                        item.id ===
-                        schedule.id
-                            ? updatedSchedule
-                            : item
-                );
-
             try {
+                /*
+                 * 현재 일정에 연결된
+                 * Local Notification 하나만 취소합니다.
+                 *
+                 * seriesId 기준으로 취소하지 않습니다.
+                 */
+                if (
+                    schedule.localNotificationId
+                ) {
+                    try {
+                        await cancelScheduledNotificationAsync(
+                            schedule.localNotificationId
+                        );
+
+                        console.log(
+                            "실패 일정 알림 취소 완료:",
+                            {
+                                scheduleId:
+                                schedule.id,
+
+                                seriesId:
+                                schedule.seriesId,
+
+                                notificationId:
+                                schedule.localNotificationId,
+                            }
+                        );
+                    } catch (
+                        notificationError
+                        ) {
+                        console.error(
+                            "실패 일정 알림 취소 오류:",
+                            notificationError
+                        );
+                    }
+                }
+
+                const updatedSchedule:
+                    LocalSchedule = {
+                    ...schedule,
+
+                    status:
+                        "failed",
+
+                    completed:
+                        false,
+
+                    /*
+                     * 현재 회차의 알림을 취소했으므로
+                     * Storage에서도 notificationId를 제거합니다.
+                     */
+                    localNotificationId:
+                        null,
+                };
+
+                /*
+                 * schedule.id 기준으로
+                 * 현재 일정 1건만 실패 처리합니다.
+                 *
+                 * 같은 seriesId의 이후 반복 일정은
+                 * 변경하지 않습니다.
+                 */
+                const nextSchedules =
+                    schedules.map(
+                        (
+                            item
+                        ) =>
+                            item.id ===
+                            schedule.id
+                                ? updatedSchedule
+                                : item
+                    );
+
                 await saveSchedules(
                     nextSchedules
                 );
@@ -1335,7 +1632,13 @@ export default function HomeScreen() {
 
                 console.log(
                     "일정 실패 처리 완료:",
-                    schedule.id
+                    {
+                        scheduleId:
+                        schedule.id,
+
+                        seriesId:
+                        schedule.seriesId,
+                    }
                 );
             } catch (
                 error
