@@ -1,0 +1,24 @@
+import "react-native-url-polyfill/auto";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
+import { createClient } from "@supabase/supabase-js";
+/* 나중에 수정할것 */
+const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+if (!url || !key) {
+    throw new Error(
+        ".env에 Supabase URL과 Publishable Key를 입력하고 Expo를 재시작해주세요."
+    );
+}
+
+export const supabase = createClient(url, key, {
+    auth: {
+        ...(Platform.OS !== "web" ? { storage: AsyncStorage } : {}),
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+    },
+});
+
+

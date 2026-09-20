@@ -4,10 +4,10 @@
 node_modules/
 
 # Expo
-.expo/
+frontend/.expo/
 dist/
 web-build/
-expo-env.d.ts
+frontend/expo-env.d.ts
 
 # Native
 .kotlin/
@@ -32,7 +32,7 @@ yarn-error.*
 
 # local env files
 .env*.local
-.env
+frontend/.env
 # typescript
 *.tsbuildinfo
 
@@ -40,4 +40,8 @@ example
 
 # generated native folders
 /ios
-/android
+/frontend/android
+
+# IntelliJ IDEA local project settings
+.idea/
+*.iml
