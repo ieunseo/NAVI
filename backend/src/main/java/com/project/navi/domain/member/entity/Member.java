@@ -19,8 +19,9 @@ public class Member extends BaseTimeEntity {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private MemberStatus status = MemberStatus.active;
+    private MemberStatus status = MemberStatus.ACTIVE;
 
     @Column(name = "withdrawn_at")
     private Instant withdrawnAt;
@@ -30,6 +31,6 @@ public class Member extends BaseTimeEntity {
     }
 
     public boolean isActive() {
-        return status == MemberStatus.active;
+        return status == MemberStatus.ACTIVE;
     }
 }
