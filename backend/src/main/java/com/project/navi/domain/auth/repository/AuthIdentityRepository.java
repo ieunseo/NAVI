@@ -12,6 +12,7 @@ import java.util.UUID;
 public interface AuthIdentityRepository
         extends JpaRepository<AuthIdentity, UUID> {
 
+    /* 이메일로 로그인*/
     @Query("""
             select a
             from AuthIdentity a

@@ -30,9 +30,11 @@ public class AuthIdentity extends BaseTimeEntity {
     @Column(nullable = false, length = 320)
     private String email;
 
+    /* 나중에 Password.Encoder.encode() 로 해시전달*/
     @Column(name = "password_hash", columnDefinition = "text")
     private String passwordHash;
 
+    /* 이메일 인증 */
     @Column(name = "email_verified_at")
     private Instant emailVerifiedAt;
 
