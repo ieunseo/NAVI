@@ -9,6 +9,7 @@ import java.time.Instant;
  * 모든 엔티티의 공통 필드 + 수명주기 콜백으로 타임스탬프 관리
  * createdAt : 최초 INSERT 시 한 번만 세팅
  * updatedAt : INSERT · UPDATE 마다 변경
+ * 인스턴스 : UTC 기준의 특정 시점(timestamp) 을 표현
  */
 @Getter
 @Setter
