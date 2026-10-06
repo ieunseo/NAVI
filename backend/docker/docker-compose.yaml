@@ -1,10 +1,16 @@
+# 같은 PC에서 다른 프로젝트(howareyou 등)와 함께 띄울 수 있도록
+# 프로젝트 이름 / 컨테이너 이름 / 볼륨 / 호스트 포트를 navi 전용으로 분리한다.
+#   postgres : 호스트 5433 → 컨테이너 5432 (howareyou 가 5432 사용)
+#   redis    : 호스트 6380 → 컨테이너 6379 (howareyou 가 6379 사용)
+name: navi
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: navi-postgres
 
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
 
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -27,16 +33,38 @@ services:
     restart: unless-stopped
 
 
+  redis:
+    image: redis:7-alpine
+    container_name: navi-redis
+
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+
+    volumes:
+      - navi-redis-data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+
   mailpit:
     image: axllent/mailpit:latest
     container_name: navi-mailpit
 
     ports:
-      - "${MAILPIT_SMTP_PORT}:1025"
-      - "${MAILPIT_WEB_PORT}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_WEB_PORT:-8025}:8025"
 
     restart: unless-stopped
 
 
 volumes:
   navi-postgres-data:
+    name: navi-postgres-data
+  navi-redis-data:
+    name: navi-redis-data
