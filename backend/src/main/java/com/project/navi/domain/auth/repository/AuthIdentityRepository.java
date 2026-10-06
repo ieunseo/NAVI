@@ -23,4 +23,6 @@ public interface AuthIdentityRepository
             @Param("provider") AuthProvider provider,
             @Param("email") String email
     );
+
+    Optional<AuthIdentity> findByMemberIdAndProvider(UUID memberId, AuthProvider provider);
 }

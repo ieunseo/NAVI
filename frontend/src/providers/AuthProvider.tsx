@@ -5,16 +5,34 @@ import {
     useState,
     type ReactNode,
 } from "react";
-import type { Session } from "@supabase/supabase-js";
+import { Alert } from "react-native";
 
-import { supabase } from "../lib/supabase";
-import { watchAppState } from "../lib/watch-app-state";
+import { ApiError } from "../lib/api";
+import {
+    loadStoredSession,
+    refreshSession,
+    signInWithEmail,
+    signOut as signOutSession,
+    signUpWithEmail,
+    subscribeSession,
+    type Session,
+} from "../lib/auth-session";
 
 type AuthValue = {
     session: Session | null;
     loading: boolean;
     error: string | null;
     retry: () => Promise<void>;
+    signIn: (params: {
+        email: string;
+        password: string;
+    }) => Promise<Session>;
+    signUp: (params: {
+        email: string;
+        password: string;
+        nickname: string;
+    }) => Promise<{ email: string }>;
+    signOut: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthValue>({
@@ -22,6 +40,13 @@ export const AuthContext = createContext<AuthValue>({
     loading: true,
     error: null,
     retry: async () => {},
+    signIn: async () => {
+        throw new Error("AuthProvider가 필요합니다.");
+    },
+    signUp: async () => {
+        throw new Error("AuthProvider가 필요합니다.");
+    },
+    signOut: async () => {},
 });
 
 export function AuthProvider({
@@ -39,10 +64,13 @@ export function AuthProvider({
         useState<string | null>(null);
 
     /*
-     * 저장된 Supabase Session 복구
+     * 저장된 Session 복구
      *
      * 앱 최초 실행 / 재실행 시
-     * 현재 로그인 상태를 확인합니다.
+     * 저장된 토큰을 불러온 뒤 서버에서 재발급받아
+     * 아직 유효한 로그인인지 확인합니다.
+     *
+     * 네트워크 오류일 때는 저장된 로그인 상태를 유지합니다.
      */
     const initializeSession = useCallback(
         async () => {
@@ -50,27 +78,36 @@ export function AuthProvider({
             setError(null);
 
             try {
-                const {
-                    data: { session: initialSession },
-                    error: sessionError,
-                } = await supabase.auth.getSession();
+                const storedSession =
+                    await loadStoredSession();
 
-                if (sessionError) {
-                    throw sessionError;
+                setSession(storedSession);
+
+                if (storedSession) {
+                    await refreshSession();
+                }
+            } catch (error) {
+                if (
+                    error instanceof ApiError &&
+                    error.code === "NETWORK_ERROR"
+                ) {
+                    return;
                 }
 
-                setSession(initialSession);
-            } catch (error) {
-                console.error(
-                    "initialize auth session error:",
-                    error
-                );
+                // 401 은 auth-session 에서 세션을 비우고 구독으로 반영됩니다.
+                if (
+                    !(error instanceof ApiError) ||
+                    error.status !== 401
+                ) {
+                    console.error(
+                        "initialize auth session error:",
+                        error
+                    );
 
-                setSession(null);
-
-                setError(
-                    "네트워크 상태를 확인한 후 다시 시도해주세요."
-                );
+                    setError(
+                        "네트워크 상태를 확인한 후 다시 시도해주세요."
+                    );
+                }
             } finally {
                 setLoading(false);
             }
@@ -79,80 +116,28 @@ export function AuthProvider({
     );
 
     /*
-     * 앱이 foreground / background로 이동할 때
-     * Supabase 토큰 자동 갱신 상태를 관리합니다.
-     */
-    useEffect(watchAppState, []);
-
-    /*
      * 앱 시작 시 저장된 Session을 복구하고
-     * 이후 로그인 / 로그아웃 상태 변화를 감지합니다.
+     * 이후 로그인 / 로그아웃 / 토큰 재발급을 감지합니다.
      */
     useEffect(() => {
-        let mounted = true;
-
-        const initialize = async () => {
-            setLoading(true);
-            setError(null);
-
-            try {
-                const {
-                    data: { session: initialSession },
-                    error: sessionError,
-                } = await supabase.auth.getSession();
-
-                if (sessionError) {
-                    throw sessionError;
-                }
-
-                if (!mounted) {
-                    return;
-                }
-
-                setSession(initialSession);
-            } catch (error) {
-                console.error(
-                    "initialize auth session error:",
-                    error
-                );
-
-                if (!mounted) {
-                    return;
-                }
-
-                setSession(null);
-
-                setError(
-                    "네트워크 상태를 확인한 후 다시 시도해주세요."
-                );
-            } finally {
-                if (mounted) {
-                    setLoading(false);
-                }
-            }
-        };
-
-        void initialize();
-
-        const {
-            data: { subscription },
-        } = supabase.auth.onAuthStateChange(
-            (_event, nextSession) => {
-                if (!mounted) {
-                    return;
-                }
-
+        const unsubscribe = subscribeSession(
+            (nextSession, reason) => {
                 setSession(nextSession);
                 setError(null);
-                setLoading(false);
+
+                if (reason === "REPLACED") {
+                    Alert.alert(
+                        "로그아웃되었어요",
+                        "다른 기기에서 로그인되어 로그아웃되었어요."
+                    );
+                }
             }
         );
 
-        return () => {
-            mounted = false;
-            subscription.unsubscribe();
-        };
-    }, []);
+        void initializeSession();
+
+        return unsubscribe;
+    }, [initializeSession]);
 
     /*
      * 오류 화면의 "다시 시도" 버튼에서 사용합니다.
@@ -168,6 +153,9 @@ export function AuthProvider({
                 loading,
                 error,
                 retry,
+                signIn: signInWithEmail,
+                signUp: signUpWithEmail,
+                signOut: signOutSession,
             }}
         >
             {children}

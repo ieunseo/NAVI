@@ -81,6 +81,12 @@ public class AuthSession {
                 && refreshTokenExpiresAt.isAfter(now);
     }
 
+    // 다른 기기 로그인으로 끊긴 세션인지 (클라이언트에 SESSION_REVOKED 로 알려준다)
+    public boolean isReplacedByNewLogin() {
+        return status == AuthSessionStatus.REVOKED
+                && revokedReason == RevokedReason.REPLACED_BY_NEW_LOGIN;
+    }
+
     // 다른기기에서 로그인시 호출되는 메서드
     public void revokeForNewLogin(Instant now) {
         status = AuthSessionStatus.REVOKED;

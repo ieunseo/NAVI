@@ -22,9 +22,13 @@ import { Colors } from "../../constants/colors";
 import { Layout } from "../../constants/layout";
 import { Typography } from "../../constants/typography";
 
-import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../hooks/useAuth";
+import { ApiError } from "../../lib/api";
+import { resendVerificationEmail } from "../../lib/auth-session";
 
 export default function LoginScreen() {
+    const { signIn } = useAuth();
+
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
@@ -42,12 +46,17 @@ export default function LoginScreen() {
         try {
             setLoading(true);
 
-            const { error } = await supabase.auth.signInWithPassword({
+            await signIn({
                 email: email.trim(),
                 password,
             });
 
-            if (error) {
+            router.replace("/");
+        } catch (error) {
+            if (
+                error instanceof ApiError &&
+                error.code === "INVALID_CREDENTIALS"
+            ) {
                 Alert.alert(
                     "로그인 정보를 확인해 주세요",
                     "이메일 또는 비밀번호가 올바르지 않아요."
@@ -56,16 +65,60 @@ export default function LoginScreen() {
                 return;
             }
 
-            router.replace("/");
-        } catch (error) {
+            if (
+                error instanceof ApiError &&
+                error.code === "EMAIL_NOT_VERIFIED"
+            ) {
+                Alert.alert(
+                    "이메일 인증이 필요해요",
+                    "가입할 때 받은 메일의 인증 링크를 눌러 주세요.",
+                    [
+                        {
+                            text: "확인",
+                            style: "cancel",
+                        },
+                        {
+                            text: "인증 메일 다시 받기",
+                            onPress: () => {
+                                void handleResendVerification();
+                            },
+                        },
+                    ]
+                );
+
+                return;
+            }
+
             console.error("login error:", error);
 
             Alert.alert(
                 "로그인에 실패했어요",
-                "잠시 후 다시 시도해 주세요."
+                error instanceof ApiError
+                    ? error.message
+                    : "잠시 후 다시 시도해 주세요."
             );
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResendVerification = async () => {
+        try {
+            await resendVerificationEmail(email.trim());
+
+            router.push({
+                pathname: "/auth/signup-email-sent",
+                params: {
+                    email: email.trim(),
+                },
+            });
+        } catch (error) {
+            console.error("resend verification error:", error);
+
+            Alert.alert(
+                "메일을 보내지 못했어요",
+                "잠시 후 다시 시도해 주세요."
+            );
         }
     };
 

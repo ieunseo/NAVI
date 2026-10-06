@@ -19,9 +19,12 @@ import { PasswordInput } from "../../components/ui/PasswordInput";
 import { Colors } from "../../constants/colors";
 import { Layout } from "../../constants/layout";
 
-import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../hooks/useAuth";
+import { ApiError } from "../../lib/api";
 
 export default function SignupScreen() {
+    const { signUp } = useAuth();
+
     const [email, setEmail] = useState("");
     const [nickname, setNickname] = useState("");
     const [password, setPassword] = useState("");
@@ -70,18 +73,21 @@ export default function SignupScreen() {
         try {
             setLoading(true);
 
-            const { data, error } = await supabase.auth.signUp({
+            // 가입하면 인증 메일이 발송됩니다.
+            const { email: sentEmail } = await signUp({
                 email: email.trim(),
                 password,
-                options: {
-                    emailRedirectTo: "navi://auth/callback",
-                    data: {
-                        nickname: nickname.trim(),
-                    },
-                },
+                nickname: nickname.trim(),
             });
 
-            if (error) {
+            router.push({
+                pathname: "/auth/signup-email-sent",
+                params: {
+                    email: sentEmail,
+                },
+            });
+        } catch (error) {
+            if (error instanceof ApiError) {
                 Alert.alert(
                     "회원가입에 실패했어요",
                     error.message
@@ -89,15 +95,6 @@ export default function SignupScreen() {
                 return;
             }
 
-            console.log("signup data:", data);
-
-            router.push({
-                pathname: "/auth/signup-email-sent",
-                params: {
-                    email: email.trim(),
-                },
-            });
-        } catch (error) {
             console.error("signup error:", error);
 
             Alert.alert(

@@ -38,8 +38,6 @@ import {
 import { Colors } from "../constants/colors";
 import { STORAGE_KEYS } from "../constants/storageKeys";
 
-import { supabase } from "../lib/supabase";
-
 import { useAuth } from "../hooks/useAuth";
 import { useRequireAuth } from "../hooks/useRequireAuth";
 
@@ -428,6 +426,7 @@ export default function HomeScreen() {
             authError,
         retry:
             retryAuth,
+        signOut,
     } =
         useAuth();
 
@@ -600,23 +599,7 @@ export default function HomeScreen() {
      */
     const handleLogoutForTest =
         async () => {
-            const {
-                error,
-            } =
-                await supabase
-                    .auth
-                    .signOut();
-
-            if (
-                error
-            ) {
-                console.error(
-                    "[개발용] 로그아웃 오류:",
-                    error
-                );
-
-                return;
-            }
+            await signOut();
 
             console.log(
                 "[개발용] 로그아웃 완료"
@@ -1877,7 +1860,6 @@ export default function HomeScreen() {
                                 >
                                     {session
                                             .user
-                                            .user_metadata
                                             .nickname ??
                                         "NAVI"}
                                 </Text>

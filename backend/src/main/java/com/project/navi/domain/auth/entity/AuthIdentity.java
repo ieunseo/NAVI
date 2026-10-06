@@ -50,4 +50,14 @@ public class AuthIdentity extends BaseTimeEntity {
         identity.passwordHash = encodedPassword;
         return identity;
     }
+
+    public boolean isEmailVerified() {
+        return emailVerifiedAt != null;
+    }
+
+    public void verifyEmail(Instant now) {
+        if (emailVerifiedAt == null) {
+            emailVerifiedAt = now;
+        }
+    }
 }

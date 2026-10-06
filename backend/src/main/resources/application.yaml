@@ -21,5 +21,27 @@ spring:
     locations:
       - classpath:db/migration
 
+  # 로컬은 docker 의 mailpit (http://localhost:8025 에서 메일 확인)
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+
 server:
   port: 8080
+
+navi:
+  jwt:
+    # HS256 서명 키, 32바이트 이상 (예: openssl rand -base64 48)
+    secret: ${JWT_SECRET}
+    issuer: navi
+    access-token-ttl: 30m
+    refresh-token-ttl: 14d
+  email-verification:
+    # 인증 링크가 가리킬 서버 주소 (실기기에서 누르려면 PC IP 또는 배포 주소)
+    base-url: ${APP_BASE_URL:http://localhost:8080}
+    from: NAVI <no-reply@navi.app>
+    token-ttl: 24h
+    resend-interval: 60s
+  cors:
+    # Expo Web 개발 서버
+    allowed-origins: http://localhost:8081

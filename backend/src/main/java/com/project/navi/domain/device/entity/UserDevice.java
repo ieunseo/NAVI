@@ -64,4 +64,11 @@ public class UserDevice {
     public void updateLastSeen() {
         this.lastSeenAt = Instant.now();
     }
+
+    /* 로그인 시 기존 기기 정보 갱신 (앱 업데이트 등) */
+    public void updateInfo(String deviceName, String appVersion) {
+        this.deviceName = deviceName;
+        this.appVersion = appVersion;
+        updateLastSeen();
+    }
 }
