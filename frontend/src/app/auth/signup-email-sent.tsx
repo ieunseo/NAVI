@@ -1,10 +1,14 @@
+import { useState } from "react";
 import {
+    Alert,
     SafeAreaView,
     StyleSheet,
     Text,
     View,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+
+import { resendVerificationEmail } from "../../lib/auth-session";
 
 import { AppButton } from "../../components/ui/AppButton";
 import { AuthBackButton } from "../../components/auth/AuthBackButton";
@@ -17,6 +21,38 @@ export default function SignupEmailSentScreen() {
     const { email } = useLocalSearchParams<{
         email?: string;
     }>();
+
+    const [resending, setResending] = useState(false);
+
+    /*
+     * 같은 메일로 너무 자주 요청하면
+     * 서버가 조용히 무시하므로 안내 문구는 항상 같습니다.
+     */
+    const handleResend = async () => {
+        if (!email) {
+            return;
+        }
+
+        try {
+            setResending(true);
+
+            await resendVerificationEmail(email);
+
+            Alert.alert(
+                "인증 메일을 다시 보냈어요",
+                "메일이 보이지 않으면 스팸함도 확인해 주세요."
+            );
+        } catch (error) {
+            console.error("resend verification error:", error);
+
+            Alert.alert(
+                "메일을 보내지 못했어요",
+                "잠시 후 다시 시도해 주세요."
+            );
+        } finally {
+            setResending(false);
+        }
+    };
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -40,6 +76,14 @@ export default function SignupEmailSentScreen() {
                 </View>
 
                 <View style={styles.buttonArea}>
+                    <AppButton
+                        title="인증 메일 다시 보내기"
+                        variant="secondary"
+                        loading={resending}
+                        disabled={!email || resending}
+                        onPress={handleResend}
+                    />
+
                     <AppButton
                         title="로그인 화면으로"
                         onPress={() => router.replace("/auth/login")}
@@ -90,5 +134,6 @@ const styles = StyleSheet.create({
 
     buttonArea: {
         marginTop: "auto",
+        gap: 12,
     },
 });

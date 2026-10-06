@@ -35,3 +35,14 @@ out/
 
 ### VS Code ###
 .vscode/
+# Environment variables
+.env
+**/.env
+
+# IntelliJ
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
