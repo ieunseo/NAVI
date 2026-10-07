@@ -47,6 +47,7 @@ public class SecurityConfig {
                                 "/api/auth/refresh",
                                 "/api/auth/verify-email",
                                 "/api/auth/verify-email/resend",
+                                "/api/terms/required",
                                 "/error"
                         ).permitAll()
                         .anyRequest().authenticated())

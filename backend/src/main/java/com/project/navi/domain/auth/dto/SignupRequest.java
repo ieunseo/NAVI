@@ -2,7 +2,11 @@ package com.project.navi.domain.auth.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
+
+import java.util.Set;
+import java.util.UUID;
 
 /* 가입 후 이메일 인증을 마쳐야 로그인할 수 있으므로 기기 정보는 받지 않는다 */
 public record SignupRequest(
@@ -17,6 +21,9 @@ public record SignupRequest(
 
         @NotBlank(message = "닉네임을 입력해 주세요.")
         @Size(max = 8, message = "닉네임은 8자 이하로 입력해 주세요.")
-        String nickname
+        String nickname,
+
+        @NotEmpty(message = "필수 약관에 동의해 주세요.")
+        Set<UUID> agreedTermIds
 ) {
 }

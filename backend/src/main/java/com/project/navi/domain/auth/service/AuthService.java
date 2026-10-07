@@ -22,6 +22,7 @@ import com.project.navi.domain.member.entity.Profile;
 import com.project.navi.domain.member.repository.MemberRepository;
 import com.project.navi.domain.member.repository.ProfileRepository;
 import com.project.navi.domain.member.service.MemberService;
+import com.project.navi.domain.term.service.TermService;
 import com.project.navi.global.exception.ApiException;
 import com.project.navi.global.exception.ErrorCode;
 import com.project.navi.global.security.CustomUserPrincipal;
@@ -46,6 +47,7 @@ public class AuthService {
     private final DeviceService deviceService;
     private final EmailVerificationService emailVerificationService;
     private final MemberService memberService;
+    private final TermService termService;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordEncoder passwordEncoder;
 
@@ -57,8 +59,6 @@ public class AuthService {
             throw new ApiException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
-        Instant now = Instant.now();
-
         Member member = memberRepository.save(Member.create());
 
         AuthIdentity identity = authIdentityRepository.save(AuthIdentity.createLocal(
@@ -67,8 +67,10 @@ public class AuthService {
                 passwordEncoder.encode(request.password())));
 
         Profile profile = Profile.create(member.getId(), request.nickname().strip());
-        profile.completeSignup(now);
         profileRepository.save(profile);
+
+        termService.recordRequiredConsents(
+                member.getId(), request.agreedTermIds(), Instant.now());
 
         emailVerificationService.send(identity);
 

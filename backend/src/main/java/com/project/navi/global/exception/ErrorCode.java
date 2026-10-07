@@ -22,6 +22,9 @@ public enum ErrorCode {
     /* 1세션 1로그인 - 다른 기기에서 로그인해 기존 세션이 끊긴 경우 */
     SESSION_REVOKED(HttpStatus.UNAUTHORIZED, "다른 기기에서 로그인되어 로그아웃되었어요."),
 
+    /* 약관 */
+    REQUIRED_TERMS_NOT_AGREED(HttpStatus.BAD_REQUEST, "현재 적용 중인 필수 약관에 모두 동의해 주세요."),
+
     /* 회원 */
     EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 가입된 이메일이에요."),
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원 정보를 찾을 수 없어요."),

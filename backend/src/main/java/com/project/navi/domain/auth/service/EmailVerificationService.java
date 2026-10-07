@@ -5,6 +5,8 @@ import com.project.navi.domain.auth.entity.AuthProvider;
 import com.project.navi.domain.auth.entity.EmailVerificationToken;
 import com.project.navi.domain.auth.repository.AuthIdentityRepository;
 import com.project.navi.domain.auth.repository.EmailVerificationTokenRepository;
+import com.project.navi.domain.member.entity.Profile;
+import com.project.navi.domain.member.repository.ProfileRepository;
 import com.project.navi.global.security.SecureTokenUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -21,6 +23,7 @@ public class EmailVerificationService {
 
     private final AuthIdentityRepository authIdentityRepository;
     private final EmailVerificationTokenRepository tokenRepository;
+    private final ProfileRepository profileRepository;
     private final EmailVerificationProperties properties;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -105,6 +108,11 @@ public class EmailVerificationService {
 
         verificationToken.use(now);
         identity.verifyEmail(now);
+
+        Profile profile = profileRepository.findById(identity.getMemberId())
+                .orElseThrow(() -> new IllegalStateException("회원 프로필을 찾을 수 없습니다."));
+        profile.completeSignup(now);
+
         return VerifyResult.VERIFIED;
     }
 }
