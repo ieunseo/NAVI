@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     Alert,
     KeyboardAvoidingView,
@@ -6,12 +6,14 @@ import {
     SafeAreaView,
     ScrollView,
     StyleSheet,
+    Text,
     View,
 } from "react-native";
 import { router } from "expo-router";
 
 import { AuthBackButton } from "../../components/auth/AuthBackButton";
 import { AuthHeader } from "../../components/auth/AuthHeader";
+import { TermsAgreement } from "../../components/auth/TermsAgreement";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppInput } from "../../components/ui/AppInput";
 import { PasswordInput } from "../../components/ui/PasswordInput";
@@ -21,6 +23,7 @@ import { Layout } from "../../constants/layout";
 
 import { useAuth } from "../../hooks/useAuth";
 import { ApiError } from "../../lib/api";
+import { fetchRequiredTerms, type Term } from "../../lib/terms";
 
 export default function SignupScreen() {
     const { signUp } = useAuth();
@@ -33,13 +36,37 @@ export default function SignupScreen() {
     const [nicknameError, setNicknameError] = useState("");
     const [passwordError, setPasswordError] = useState("");
 
+    const [terms, setTerms] = useState<Term[]>([]);
+    const [termsLoadFailed, setTermsLoadFailed] = useState(false);
+    const [agreedTermIds, setAgreedTermIds] = useState<Set<string>>(new Set());
+    const [termsError, setTermsError] = useState("");
+
     const [loading, setLoading] = useState(false);
+
+    /*
+     * 현재 적용 중인 필수 약관
+     * 약관 버전이 바뀌면 서버가 새 약관 id 를 내려줍니다.
+     */
+    const loadTerms = useCallback(async () => {
+        try {
+            setTermsLoadFailed(false);
+            setTerms(await fetchRequiredTerms());
+        } catch (error) {
+            console.error("load terms error:", error);
+            setTermsLoadFailed(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadTerms();
+    }, [loadTerms]);
 
     const validate = () => {
         let valid = true;
 
         setNicknameError("");
         setPasswordError("");
+        setTermsError("");
 
         if (nickname.trim().length === 0) {
             setNicknameError("닉네임을 입력해 주세요.");
@@ -54,6 +81,17 @@ export default function SignupScreen() {
             valid = false;
         } else if (password !== passwordConfirm) {
             setPasswordError("비밀번호가 일치하지 않아요.");
+            valid = false;
+        }
+
+        const requiredAgreed =
+            terms.length > 0 &&
+            terms
+                .filter((term) => term.required)
+                .every((term) => agreedTermIds.has(term.id));
+
+        if (!requiredAgreed) {
+            setTermsError("필수 약관에 모두 동의해 주세요.");
             valid = false;
         }
 
@@ -78,6 +116,7 @@ export default function SignupScreen() {
                 email: email.trim(),
                 password,
                 nickname: nickname.trim(),
+                agreedTermIds: [...agreedTermIds],
             });
 
             router.push({
@@ -88,6 +127,12 @@ export default function SignupScreen() {
             });
         } catch (error) {
             if (error instanceof ApiError) {
+                // 가입 도중 약관 버전이 바뀐 경우 최신 약관으로 다시 동의받습니다.
+                if (error.code === "REQUIRED_TERMS_NOT_AGREED") {
+                    setAgreedTermIds(new Set());
+                    void loadTerms();
+                }
+
                 Alert.alert(
                     "회원가입에 실패했어요",
                     error.message
@@ -180,6 +225,31 @@ export default function SignupScreen() {
                         />
                     </View>
 
+                    <View style={styles.termsArea}>
+                        {termsLoadFailed ? (
+                            <View style={styles.termsFailed}>
+                                <Text style={styles.termsFailedText}>
+                                    약관을 불러오지 못했어요.
+                                </Text>
+                                <AppButton
+                                    title="다시 불러오기"
+                                    variant="secondary"
+                                    onPress={loadTerms}
+                                />
+                            </View>
+                        ) : (
+                            <TermsAgreement
+                                terms={terms}
+                                agreedIds={agreedTermIds}
+                                onChange={(next) => {
+                                    setAgreedTermIds(next);
+                                    setTermsError("");
+                                }}
+                                error={termsError}
+                            />
+                        )}
+                    </View>
+
                     <View style={styles.buttonArea}>
                         <AppButton
                             title="계속하기"
@@ -226,7 +296,20 @@ const styles = StyleSheet.create({
         gap: 26,
     },
 
+    termsArea: {
+        marginTop: 36,
+    },
+
+    termsFailed: {
+        gap: 12,
+    },
+
+    termsFailedText: {
+        fontSize: 14,
+        color: Colors.textSecondary,
+    },
+
     buttonArea: {
-        marginTop: 42,
+        marginTop: 32,
     },
 });

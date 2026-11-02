@@ -191,6 +191,7 @@ export async function signUpWithEmail(params: {
     email: string;
     password: string;
     nickname: string;
+    agreedTermIds: string[];
 }) {
     return apiRequest<{ email: string }>(
         "/api/auth/signup",

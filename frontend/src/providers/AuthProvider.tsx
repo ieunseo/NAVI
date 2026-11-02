@@ -31,6 +31,7 @@ type AuthValue = {
         email: string;
         password: string;
         nickname: string;
+        agreedTermIds: string[];
     }) => Promise<{ email: string }>;
     signOut: () => Promise<void>;
 };

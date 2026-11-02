@@ -29,6 +29,7 @@ export type ApiErrorCode =
     | "EMAIL_ALREADY_EXISTS"
     | "MEMBER_NOT_FOUND"
     | "MEMBER_NOT_ACTIVE"
+    | "REQUIRED_TERMS_NOT_AGREED"
     | "NETWORK_ERROR";
 
 type ApiResponseBody<T> = {
