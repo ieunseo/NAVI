@@ -24,7 +24,6 @@ import {
 
 import { Ionicons } from "@expo/vector-icons";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
     scheduleNotificationAsync,
@@ -38,9 +37,16 @@ import {
     SchedulableTriggerInputTypes,
 } from "expo-notifications/build/Notifications.types";
 
-import { STORAGE_KEYS } from "../constants/storageKeys";
 
 import { useAuth } from "../hooks/useAuth";
+
+import {
+    loadSchedules,
+    saveSchedules,
+    type LocalSchedule,
+    type RepeatType,
+    type ScheduleStatus,
+} from "../lib/schedules";
 
 /*
  * =====================================================
@@ -48,44 +54,9 @@ import { useAuth } from "../hooks/useAuth";
  * =====================================================
  */
 
-type RepeatType =
-    | "none"
-    | "daily"
-    | "weekday"
-    | "weekly";
-
-type ScheduleStatus =
-    | "pending"
-    | "completed"
-    | "failed";
-
 type EditScope =
     | "single"
     | "future";
-
-type LocalSchedule = {
-    id: string;
-
-    seriesId?: string | null;
-
-    title: string;
-
-    memo?: string | null;
-
-    scheduledAt: string;
-
-    repeatType?: RepeatType;
-
-    status: ScheduleStatus;
-
-    completed: boolean;
-
-    reminderMinutes?:
-        number | null;
-
-    localNotificationId?:
-        string | null;
-};
 
 type DateOption = {
     label: string;
@@ -204,67 +175,6 @@ const MINUTE_OPTIONS =
         ) =>
             index
     );
-
-/*
- * =====================================================
- * Storage
- * =====================================================
- */
-
-function getScheduleStorageKey(
-    userId?: string
-) {
-    return `${STORAGE_KEYS.localSchedulesPrefix}:${
-        userId ?? "guest"
-    }`;
-}
-
-/*
- * =====================================================
- * 데이터 보정
- * =====================================================
- */
-
-function normalizeSchedule(
-    schedule:
-    LocalSchedule
-): LocalSchedule {
-    const normalizedStatus:
-        ScheduleStatus =
-        schedule.status ??
-        (
-            schedule.completed
-                ? "completed"
-                : "pending"
-        );
-
-    return {
-        ...schedule,
-
-        seriesId:
-            schedule.seriesId ??
-            null,
-
-        repeatType:
-            schedule.repeatType ??
-            "none",
-
-        status:
-        normalizedStatus,
-
-        completed:
-            normalizedStatus ===
-            "completed",
-
-        reminderMinutes:
-            schedule.reminderMinutes ??
-            null,
-
-        localNotificationId:
-            schedule.localNotificationId ??
-            null,
-    };
-}
 
 /*
  * =====================================================
@@ -729,50 +639,9 @@ export default function ScheduleEditScreen() {
                             return;
                         }
 
-                        const storageKey =
-                            getScheduleStorageKey(
-                                session
-                                    ?.user
-                                    .id
-                            );
-
-                        const stored =
-                            await AsyncStorage.getItem(
-                                storageKey
-                            );
-
-                        if (
-                            !stored
-                        ) {
-                            throw new Error(
-                                "stored schedule not found"
-                            );
-                        }
-
-                        const parsed =
-                            JSON.parse(
-                                stored
-                            );
-
-                        if (
-                            !Array.isArray(
-                                parsed
-                            )
-                        ) {
-                            throw new Error(
-                                "invalid stored schedules"
-                            );
-                        }
-
-                        const normalized:
-                            LocalSchedule[] =
-                            parsed.map(
-                                (
-                                    schedule
-                                ) =>
-                                    normalizeSchedule(
-                                        schedule
-                                    )
+                        const normalized =
+                            await loadSchedules(
+                                session?.user.id
                             );
 
                         const target =
@@ -1004,13 +873,6 @@ export default function ScheduleEditScreen() {
             setSaving(
                 true
             );
-
-            const storageKey =
-                getScheduleStorageKey(
-                    session
-                        ?.user
-                        .id
-                );
 
             /*
              * 선택한 일정이 움직인 시간 차이입니다.
@@ -1343,11 +1205,9 @@ export default function ScheduleEditScreen() {
                  * =====================================================
                  */
 
-                await AsyncStorage.setItem(
-                    storageKey,
-                    JSON.stringify(
-                        nextSchedules
-                    )
+                await saveSchedules(
+                    session?.user.id,
+                    nextSchedules
                 );
 
                 /*

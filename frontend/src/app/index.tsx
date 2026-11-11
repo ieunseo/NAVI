@@ -41,6 +41,13 @@ import { STORAGE_KEYS } from "../constants/storageKeys";
 import { useAuth } from "../hooks/useAuth";
 import { useRequireAuth } from "../hooks/useRequireAuth";
 
+import {
+    loadSchedules as loadStoredSchedules,
+    saveSchedules as saveStoredSchedules,
+    type LocalSchedule,
+    type ScheduleStatus,
+} from "../lib/schedules";
+
 import { ScheduleCard } from "../components/home/ScheduleCard";
 import { ScheduleInfoModal } from "../components/home/ScheduleInfoModal";
 
@@ -53,50 +60,6 @@ import { LoginRequiredModal } from "../components/auth/LoginRequiredModal";
  * 타입
  * =====================================================
  */
-
-type RepeatType =
-    | "none"
-    | "daily"
-    | "weekday"
-    | "weekly";
-
-type ScheduleStatus =
-    | "pending"
-    | "completed"
-    | "failed";
-
-type LocalSchedule = {
-    id: string;
-
-    /*
-     * 같은 반복 일정 그룹을 식별하는 ID입니다.
-     *
-     * 반복 없음:
-     * null
-     *
-     * 반복 일정:
-     * 같은 반복 묶음끼리 동일한 seriesId 사용
-     */
-    seriesId?: string | null;
-
-    title: string;
-
-    memo?: string | null;
-
-    scheduledAt: string;
-
-    repeatType?: RepeatType;
-
-    status: ScheduleStatus;
-
-    completed: boolean;
-
-    reminderMinutes?:
-        number | null;
-
-    localNotificationId?:
-        string | null;
-};
 
 type HomeScheduleTestState =
     | "real"
@@ -262,59 +225,6 @@ function getTodayText() {
             ];
 
     return `${month}월 ${date}일 ${day}`;
-}
-
-/*
- * =====================================================
- * Storage
- * =====================================================
- */
-
-function getScheduleStorageKey(
-    userId?: string
-) {
-    return `${STORAGE_KEYS.localSchedulesPrefix}:${
-        userId ?? "guest"
-    }`;
-}
-
-/*
- * =====================================================
- * 기존 일정 데이터 보정
- * =====================================================
- */
-
-function normalizeSchedule(
-    schedule:
-    LocalSchedule
-): LocalSchedule {
-    const normalizedStatus:
-        ScheduleStatus =
-        schedule.status ??
-        (
-            schedule.completed
-                ? "completed"
-                : "pending"
-        );
-
-    return {
-        ...schedule,
-
-        seriesId:
-            schedule.seriesId ??
-            null,
-
-        repeatType:
-            schedule.repeatType ??
-            "none",
-
-        status:
-        normalizedStatus,
-
-        completed:
-            normalizedStatus ===
-            "completed",
-    };
 }
 
 /*
@@ -622,18 +532,9 @@ export default function HomeScreen() {
             nextSchedules:
             LocalSchedule[]
         ) => {
-            const storageKey =
-                getScheduleStorageKey(
-                    session
-                        ?.user
-                        .id
-                );
-
-            await AsyncStorage.setItem(
-                storageKey,
-                JSON.stringify(
-                    nextSchedules
-                )
+            await saveStoredSchedules(
+                session?.user.id,
+                nextSchedules
             );
 
             setSchedules(
@@ -801,54 +702,9 @@ export default function HomeScreen() {
                         return;
                     }
 
-                    const storageKey =
-                        getScheduleStorageKey(
-                            session
-                                ?.user
-                                .id
-                        );
-
-                    const storedSchedules =
-                        await AsyncStorage.getItem(
-                            storageKey
-                        );
-
-                    if (
-                        !storedSchedules
-                    ) {
-                        setSchedules(
-                            []
-                        );
-
-                        return;
-                    }
-
-                    const parsedSchedules =
-                        JSON.parse(
-                            storedSchedules
-                        );
-
-                    if (
-                        !Array.isArray(
-                            parsedSchedules
-                        )
-                    ) {
-                        setSchedules(
-                            []
-                        );
-
-                        return;
-                    }
-
-                    const normalizedSchedules:
-                        LocalSchedule[] =
-                        parsedSchedules.map(
-                            (
-                                schedule
-                            ) =>
-                                normalizeSchedule(
-                                    schedule
-                                )
+                    const normalizedSchedules =
+                        await loadStoredSchedules(
+                            session?.user.id
                         );
 
                     setSchedules(

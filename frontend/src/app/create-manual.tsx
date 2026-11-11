@@ -19,7 +19,6 @@ import {
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
 /*
@@ -54,8 +53,14 @@ import {
 } from "expo-notifications/build/Notifications.types";
 
 
-import { STORAGE_KEYS } from "../constants/storageKeys";
 import { useAuth } from "../hooks/useAuth";
+
+import {
+    loadSchedules,
+    saveSchedules,
+    type LocalSchedule,
+    type RepeatType,
+} from "../lib/schedules";
 
 
 /*
@@ -79,72 +84,6 @@ setNotificationHandler({
  * 타입
  * =====================================================
  */
-
-type RepeatType =
-    | "none"
-    | "daily"
-    | "weekday"
-    | "weekly";
-
-
-type LocalSchedule = {
-    id: string;
-
-    /*
-     * 같은 반복 일정 그룹을 식별하는 ID입니다.
-     *
-     * 반복 없음:
-     * null
-     *
-     * 반복 일정:
-     * 같은 반복 묶음끼리 동일한 seriesId 사용
-     */
-    seriesId:
-        string | null;
-
-    title: string;
-
-    memo: string | null;
-
-    scheduledAt: string;
-
-    /*
-     * 일정 반복 설정
-     *
-     * none
-     * → 반복 없음
-     *
-     * daily
-     * → 매일 반복
-     *
-     * weekday
-     * → 평일 반복 (월 ~ 금)
-     *
-     * weekly
-     * → 매주 동일 요일 반복
-     */
-    repeatType: RepeatType;
-
-    status:
-        | "pending"
-        | "completed"
-        | "failed";
-
-    completed: boolean;
-
-    reminderMinutes:
-        number | null;
-
-    /*
-     * Expo Local Notification 예약 ID
-     *
-     * 추후 일정 수정 / 삭제 / 완료 시
-     * 예약된 알림을 취소할 때 사용합니다.
-     */
-    localNotificationId:
-        string | null;
-};
-
 
 type SelectionModalType =
     | "date"
@@ -295,21 +234,6 @@ const MINUTE_OPTIONS =
         ) =>
             index
     );
-
-
-/*
- * =====================================================
- * Storage
- * =====================================================
- */
-
-function getScheduleStorageKey(
-    userId?: string
-) {
-    return `${STORAGE_KEYS.localSchedulesPrefix}:${
-        userId ?? "guest"
-    }`;
-}
 
 
 /*
@@ -1060,62 +984,14 @@ export default function CreateManualScreen() {
                 );
 
 
-                const storageKey =
-                    getScheduleStorageKey(
+                /*
+                 * 기존에 저장된 일정에는 repeatType / seriesId가
+                 * 없을 수 있어 loadSchedules에서 보정합니다.
+                 */
+                const schedules =
+                    await loadSchedules(
                         session?.user.id
                     );
-
-
-                const storedSchedules =
-                    await AsyncStorage.getItem(
-                        storageKey
-                    );
-
-
-                let schedules:
-                    LocalSchedule[] =
-                    [];
-
-
-                if (
-                    storedSchedules
-                ) {
-                    const parsed =
-                        JSON.parse(
-                            storedSchedules
-                        );
-
-
-                    if (
-                        Array.isArray(
-                            parsed
-                        )
-                    ) {
-                        /*
-                         * 기존에 저장된 일정에는
-                         * repeatType / seriesId가 없을 수 있습니다.
-                         *
-                         * 기존 데이터는 삭제하지 않고
-                         * 누락된 값을 보정합니다.
-                         */
-                        schedules =
-                            parsed.map(
-                                (
-                                    schedule
-                                ) => ({
-                                    ...schedule,
-
-                                    seriesId:
-                                        schedule.seriesId ??
-                                        null,
-
-                                    repeatType:
-                                        schedule.repeatType ??
-                                        "none",
-                                })
-                            );
-                    }
-                }
 
 
                 /*
@@ -1286,15 +1162,12 @@ export default function CreateManualScreen() {
                  * 이번에 생성한 모든 반복 회차를 추가합니다.
                  * =================================================
                  */
-                await AsyncStorage.setItem(
-                    storageKey,
-
-                    JSON.stringify(
-                        [
-                            ...schedules,
-                            ...newSchedules,
-                        ]
-                    )
+                await saveSchedules(
+                    session?.user.id,
+                    [
+                        ...schedules,
+                        ...newSchedules,
+                    ]
                 );
 
 
